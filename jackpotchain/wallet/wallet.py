@@ -291,8 +291,8 @@ class Wallet:
 
             info = self._addresses[address]
 
-            # 서명
-            signature = sign(info.private_key, tx_hash)
+            # 서명 (message_hash, private_key 순서)
+            signature = sign(tx_hash, info.private_key)
             script_sig = create_p2pkh_script_sig(signature, info.public_key)
             inp.script_sig = script_sig
 
@@ -317,7 +317,7 @@ class Wallet:
                 return False, f"Cannot find key for input {i}"
 
             info = self._addresses[address]
-            signature = sign(info.private_key, tx_hash)
+            signature = sign(tx_hash, info.private_key)
             script_sig = create_p2pkh_script_sig(signature, info.public_key)
             inp.script_sig = script_sig
 
