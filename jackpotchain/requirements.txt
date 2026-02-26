@@ -1,0 +1,8 @@
+# JackpotChain Dependencies
+
+# Web framework (for RPC)
+aiohttp>=3.8.0
+
+# Development
+pytest>=7.0.0
+pytest-asyncio>=0.20.0
