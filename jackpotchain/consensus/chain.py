@@ -3,6 +3,7 @@ Step 4.3: 체인 관리
 - 블록 체인 관리
 - Fork 처리
 - 재조직 (Reorg)
+- 영구 저장 지원
 """
 
 from typing import Dict, List, Optional, Set, Tuple
@@ -48,9 +49,10 @@ class Blockchain:
     - 체인 상태 관리
     - Fork 감지 및 처리
     - 재조직 (Reorg)
+    - 영구 저장 (data_dir 지정 시)
     """
 
-    def __init__(self, genesis_block: Block = None):
+    def __init__(self, genesis_block: Block = None, data_dir: str = None):
         # 블록 저장소 (hash -> Block)
         self._blocks: Dict[bytes, Block] = {}
 
@@ -72,10 +74,79 @@ class Blockchain:
         # 상태
         self.state = ChainState.SYNCING
 
-        # Genesis 블록 추가
-        if genesis_block is None:
-            genesis_block = create_genesis_block()
-        self._add_genesis(genesis_block)
+        # 영구 저장소 (옵션)
+        self._store = None
+        self._data_dir = data_dir
+        if data_dir:
+            from ..storage.database import BlockStore
+            self._store = BlockStore(data_dir)
+            self._load_from_store()
+        else:
+            # 저장소 없으면 Genesis로 시작
+            if genesis_block is None:
+                genesis_block = create_genesis_block()
+            self._add_genesis(genesis_block)
+
+    def _load_from_store(self):
+        """저장소에서 블록체인 로드"""
+        tip_height = self._store.get_tip_height()
+
+        if tip_height < 0:
+            # 저장된 블록 없음 - Genesis 생성
+            genesis = create_genesis_block()
+            self._add_genesis(genesis)
+            self._store.save_block(genesis, 0)
+            print(f"[Chain] Created genesis block")
+        else:
+            # 저장된 블록 로드
+            print(f"[Chain] Loading {tip_height + 1} blocks from storage...")
+            for height in range(tip_height + 1):
+                block = self._store.load_block_by_height(height)
+                if block:
+                    if height == 0:
+                        self._add_genesis(block)
+                    else:
+                        self._add_block_internal(block, height)
+
+                    # UTXO 업데이트
+                    for tx in block.transactions:
+                        self.utxo_set.apply_transaction(tx, height)
+
+            print(f"[Chain] Loaded {tip_height + 1} blocks. Height: {self.get_height()}")
+
+    def _add_block_internal(self, block: Block, height: int):
+        """블록 내부 추가 (검증 없이, 로드용)"""
+        block_hash = block.get_hash()
+        prev_hash = block.header.prev_block_hash
+
+        prev_work = 0
+        if prev_hash in self._block_index:
+            prev_work = self._block_index[prev_hash].total_work
+
+        new_work = prev_work + self._calculate_work(block.header.difficulty_target)
+
+        index = BlockIndex(
+            block_hash=block_hash,
+            prev_hash=prev_hash,
+            height=height,
+            timestamp=block.header.timestamp,
+            difficulty=block.header.difficulty_target,
+            total_work=new_work,
+            is_valid=True,
+            is_in_main_chain=True
+        )
+
+        self._blocks[block_hash] = block
+        self._block_index[block_hash] = index
+        self._height_to_hash[height] = block_hash
+
+        tip = ChainTip(
+            block_hash=block_hash,
+            height=height,
+            total_work=new_work
+        )
+        self._tips = {block_hash: tip}
+        self._main_tip = tip
 
     def _add_genesis(self, block: Block):
         """Genesis 블록 추가"""
@@ -175,6 +246,10 @@ class Blockchain:
             else:
                 # 단순 확장
                 self._height_to_hash[new_height] = block_hash
+
+            # 영구 저장
+            if self._store:
+                self._store.save_block(block, new_height)
 
             return True, "Block added to main chain"
         else:

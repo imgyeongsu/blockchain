@@ -15,6 +15,7 @@ from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
 from ..constants import DEFAULT_RPC_PORT
+from ..gacha.game import GachaGame
 
 
 @dataclass
@@ -53,6 +54,7 @@ class RPCServer:
         mempool: Mempool = None,
         wallet: Wallet = None,
         node: Node = None,
+        gacha: GachaGame = None,
         host: str = "127.0.0.1",
         port: int = DEFAULT_RPC_PORT
     ):
@@ -60,6 +62,7 @@ class RPCServer:
         self.mempool = mempool or Mempool()
         self.wallet = wallet
         self.node = node
+        self.gacha = gacha or GachaGame()
 
         self.host = host
         self.port = port
@@ -97,6 +100,10 @@ class RPCServer:
 
         # Mining
         self._methods['getmininginfo'] = self._getmininginfo
+
+        # Gacha
+        self._methods['getgachainfo'] = self._getgachainfo
+        self._methods['getjackpotpool'] = self._getjackpotpool
 
         # Utility
         self._methods['help'] = self._help
@@ -407,6 +414,34 @@ class RPCServer:
             'difficulty': self.blockchain.get_difficulty(),
             'networkhashps': 0,  # TODO
             'pooledtx': self.mempool.get_stats()['count'],
+        }
+
+    # =========================================================================
+    # Gacha Methods
+    # =========================================================================
+
+    def _getgachainfo(self) -> dict:
+        """가챠 시스템 정보"""
+        stats = self.gacha.get_stats()
+        return {
+            'pool_balance': stats['balance'] / 100_000_000,  # JACK
+            'pool_balance_satoshi': stats['balance'],
+            'total_fees_collected': stats['total_fees_collected'],
+            'total_payouts': stats['total_payouts'],
+            'payout_count': stats['payout_count'],
+            'pending_commits': stats['pending_commits'],
+            'win_probability': '1%',
+            'payout_ratio': '60%',
+        }
+
+    def _getjackpotpool(self) -> dict:
+        """잭팟 풀 상태"""
+        pool_stats = self.gacha.pool.get_stats()
+        return {
+            'balance': pool_stats['balance'] / 100_000_000,
+            'balance_satoshi': pool_stats['balance'],
+            'next_payout': pool_stats['balance'] * 0.6 / 100_000_000,
+            'total_collected': pool_stats['total_fees_collected'] / 100_000_000,
         }
 
     # =========================================================================

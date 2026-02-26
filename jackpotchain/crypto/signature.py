@@ -102,8 +102,7 @@ def sign(message_hash: bytes, private_key: bytes) -> bytes:
     sk = SigningKey.from_string(private_key, curve=SECP256k1)
     signature = sk.sign_digest(
         message_hash,
-        sigencode=sigencode_der,
-        hashfunc=hashlib.sha256
+        sigencode=sigencode_der
     )
     return signature
 
