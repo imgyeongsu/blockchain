@@ -122,6 +122,28 @@ curl -X POST http://127.0.0.1:8332 -d '{"method":"getgachainfo","params":[],"id"
 
 # 잭팟 풀 현황
 curl -X POST http://127.0.0.1:8332 -d '{"method":"getjackpotpool","params":[],"id":1}'
+
+# 가챠 타입 목록
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getgachatypes","params":[],"id":1}'
+
+# 가챠 참여 (Commit) - target: 0-99 슬롯 선택
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachacommit","params":[42],"id":1}'
+
+# 가챠 참여 (target 랜덤, 고위험 타입)
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachacommit","params":[null, "high_risk"],"id":1}'
+
+# 대기 중인 Commit 목록
+curl -X POST http://127.0.0.1:8332 -d '{"method":"listgachacommits","params":[],"id":1}'
+
+# 결과 공개 (Reveal) - 2블록 이상 대기 후
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachareveal","params":["<commit_hash>"],"id":1}'
+```
+
+**가챠 플로우:**
+```
+1. gachacommit 호출 → commit_hash 획득
+2. 2블록 이상 대기 (채굴)
+3. gachareveal 호출 → 당첨 여부 확인
 ```
 
 ### 네트워크

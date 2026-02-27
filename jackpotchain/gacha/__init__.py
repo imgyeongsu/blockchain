@@ -27,6 +27,18 @@ from .game import (
     GachaPlayResult,
     GachaGame,
 )
+from .service import (
+    GachaEvent,
+    GachaEventData,
+    GachaEventEmitter,
+    GachaConfig,
+    GachaType,
+    StandardGacha,
+    HighRiskGacha,
+    PendingCommit,
+    GachaService,
+    create_gacha_service,
+)
 
 __all__ = [
     'PoolTransaction', 'JackpotPool', 'calculate_pool_contribution',
@@ -35,4 +47,8 @@ __all__ = [
     'check_win', 'is_reveal_valid', 'get_commit_status',
     'blocks_until_reveal', 'blocks_until_expire', 'CommitStore',
     'GachaPlayResult', 'GachaGame',
+    # Service
+    'GachaEvent', 'GachaEventData', 'GachaEventEmitter',
+    'GachaConfig', 'GachaType', 'StandardGacha', 'HighRiskGacha',
+    'PendingCommit', 'GachaService', 'create_gacha_service',
 ]

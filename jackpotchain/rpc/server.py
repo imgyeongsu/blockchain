@@ -16,6 +16,7 @@ from ..wallet.wallet import Wallet
 from ..network.node import Node
 from ..constants import DEFAULT_RPC_PORT
 from ..gacha.game import GachaGame
+from ..gacha.service import GachaService, create_gacha_service
 
 
 @dataclass
@@ -55,6 +56,8 @@ class RPCServer:
         wallet: Wallet = None,
         node: Node = None,
         gacha: GachaGame = None,
+        gacha_service: GachaService = None,
+        data_dir: str = None,
         host: str = "127.0.0.1",
         port: int = DEFAULT_RPC_PORT
     ):
@@ -63,6 +66,7 @@ class RPCServer:
         self.wallet = wallet
         self.node = node
         self.gacha = gacha or GachaGame()
+        self.gacha_service = gacha_service or create_gacha_service(data_dir=data_dir)
 
         self.host = host
         self.port = port
@@ -104,6 +108,10 @@ class RPCServer:
         # Gacha
         self._methods['getgachainfo'] = self._getgachainfo
         self._methods['getjackpotpool'] = self._getjackpotpool
+        self._methods['gachacommit'] = self._gachacommit
+        self._methods['gachareveal'] = self._gachareveal
+        self._methods['listgachacommits'] = self._listgachacommits
+        self._methods['getgachatypes'] = self._getgachatypes
 
         # Utility
         self._methods['help'] = self._help
@@ -443,6 +451,147 @@ class RPCServer:
             'next_payout': pool_stats['balance'] * 0.6 / 100_000_000,
             'total_collected': pool_stats['total_fees_collected'] / 100_000_000,
         }
+
+    async def _gachacommit(self, target: int = None, gacha_type: str = "standard") -> dict:
+        """
+        가챠 참여 (Commit TX 생성 및 전파)
+
+        Args:
+            target: 목표 슬롯 (0-99, None이면 랜덤)
+            gacha_type: 가챠 타입 ("standard", "high_risk" 등)
+
+        Returns:
+            {commit_hash, target, tx_id, ...}
+        """
+        if not self.wallet:
+            raise Exception("Wallet not available")
+
+        # Commit TX 생성
+        tx, pending, error = self.gacha_service.create_commit(
+            wallet=self.wallet,
+            utxo_set=self.blockchain.utxo_set,
+            current_height=self.blockchain.get_height(),
+            target=target,
+            gacha_type=gacha_type
+        )
+
+        if error:
+            raise Exception(error)
+
+        # Mempool에 추가
+        success, msg = self.mempool.add_transaction(
+            tx,
+            self.blockchain.utxo_set,
+            self.blockchain.get_height()
+        )
+
+        if not success:
+            raise Exception(f"Failed to add to mempool: {msg}")
+
+        # 네트워크 전파
+        if self.node:
+            await self.node.broadcast_tx(tx)
+
+        return {
+            'success': True,
+            'commit_hash': pending.commit_hash.hex(),
+            'target': pending.target,
+            'tx_id': tx.get_txid().hex(),
+            'gacha_type': gacha_type,
+            'message': f"Commit created. Wait for 2+ blocks, then call gachareveal with commit_hash."
+        }
+
+    async def _gachareveal(self, commit_hash: str) -> dict:
+        """
+        가챠 결과 공개 (Reveal TX 생성 및 전파)
+
+        Args:
+            commit_hash: Commit 해시 (hex)
+
+        Returns:
+            {won, winning_slot, target, payout, tx_id, ...}
+        """
+        if not self.wallet:
+            raise Exception("Wallet not available")
+
+        commit_hash_bytes = bytes.fromhex(commit_hash)
+
+        # Reveal TX 생성
+        tx, error = self.gacha_service.create_reveal(
+            wallet=self.wallet,
+            utxo_set=self.blockchain.utxo_set,
+            commit_hash=commit_hash_bytes,
+            current_height=self.blockchain.get_height()
+        )
+
+        if error:
+            raise Exception(error)
+
+        # Mempool에 추가
+        success, msg = self.mempool.add_transaction(
+            tx,
+            self.blockchain.utxo_set,
+            self.blockchain.get_height()
+        )
+
+        if not success:
+            raise Exception(f"Failed to add to mempool: {msg}")
+
+        # 네트워크 전파
+        if self.node:
+            await self.node.broadcast_tx(tx)
+
+        # PendingCommit 정보 조회
+        pending = self.gacha_service._find_pending_commit(commit_hash_bytes)
+
+        # 결과 미리보기 (실제 결과는 블록 포함 후 확정)
+        result = {
+            'success': True,
+            'tx_id': tx.get_txid().hex(),
+            'commit_hash': commit_hash,
+            'target': pending.target if pending else 0,
+            'status': 'pending',
+            'message': "Reveal TX broadcast. Result will be determined when included in a block."
+        }
+
+        return result
+
+    def _listgachacommits(self, address: str = None) -> list:
+        """
+        대기 중인 Commit 목록
+
+        Args:
+            address: 특정 주소 (None이면 전체)
+
+        Returns:
+            [PendingCommit, ...]
+        """
+        commits = self.gacha_service.get_pending_commits(address)
+        current_height = self.blockchain.get_height()
+
+        return [
+            {
+                'commit_hash': c.commit_hash.hex(),
+                'target': c.target,
+                'address': c.address,
+                'block_height': c.block_height,
+                'tx_id': c.tx_id.hex() if c.tx_id else '',
+                'gacha_type': c.gacha_type,
+                'can_reveal': c.block_height > 0 and (current_height - c.block_height) >= 2,
+                'blocks_until_reveal': max(0, 2 - (current_height - c.block_height)) if c.block_height > 0 else 'pending',
+                'created_at': c.created_at,
+            }
+            for c in commits
+        ]
+
+    def _getgachatypes(self) -> list:
+        """
+        등록된 가챠 타입 목록
+
+        Returns:
+            [{type_id, config}, ...]
+        """
+        return self.gacha_service.list_gacha_types()
 
     # =========================================================================
     # Utility Methods
