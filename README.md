@@ -16,15 +16,15 @@ UTXO 기반 블록체인 + 온체인 가챠(복권) 시스템
 ```bash
 # 1. 가상환경 생성
 cd blockchain
-python -m venv .venv
+python -m venv jackpotchain/.venv
 
 # 2. 활성화
 # Windows (Git Bash)
-source .venv/Scripts/activate
+source jackpotchain/.venv/Scripts/activate
 # Windows (CMD)
-.venv\Scripts\activate
+jackpotchain\.venv\Scripts\activate
 # Linux/Mac
-source .venv/bin/activate
+source jackpotchain/.venv/bin/activate
 
 # 3. 의존성 설치
 pip install -r requirements.txt
