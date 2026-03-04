@@ -258,6 +258,11 @@ class Node:
         # 피어에게 주소 요청
         await self._send_getaddr(address)
 
+        # 피어 높이가 더 높으면 블록 동기화 요청 (IBD)
+        peer = self.peer_manager.get_peer(address)
+        if peer and peer.start_height > self.height:
+            await self._request_blocks(address)
+
     async def _handle_ping(self, address: PeerAddress, payload: bytes):
         """PING 처리"""
         await self._send_message(address, MessageType.PONG, payload)
@@ -297,6 +302,13 @@ class Node:
         """BLOCK 수신"""
         block, _ = Block.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
+
+        # 이전 블록이 없으면 동기화 요청
+        prev_hash = block.header.prev_block_hash
+        if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
+            # 이전 블록들이 필요함 - GETBLOCKS 요청
+            await self._request_blocks(address)
+            return
 
         if self._on_block:
             self._on_block(block, peer)
@@ -383,6 +395,13 @@ class Node:
     async def _send_getaddr(self, address: PeerAddress):
         """GETADDR 전송"""
         await self._send_message(address, MessageType.GETADDR, b'')
+
+    async def _request_blocks(self, address: PeerAddress):
+        """블록 동기화 요청 (GETBLOCKS)"""
+        # Block locator 생성: 최근 블록들의 해시
+        locator = self.blockchain.get_block_locator()
+        msg = GetBlocksMessage(block_locator=locator)
+        await self._send_message(address, MessageType.GETBLOCKS, msg.serialize())
 
     async def _send_version(self, address: PeerAddress):
         """VERSION 전송"""

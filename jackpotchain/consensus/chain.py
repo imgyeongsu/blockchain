@@ -388,6 +388,33 @@ class Blockchain:
                 hashes.append(self._height_to_hash[h])
         return hashes
 
+    def get_block_locator(self) -> List[bytes]:
+        """
+        Block locator 생성 (GETBLOCKS용)
+
+        최근 블록들의 해시를 반환. 비트코인과 유사하게:
+        - 최근 10개는 연속
+        - 이후로는 2배씩 간격 증가
+        """
+        locator = []
+        height = self.get_height()
+
+        step = 1
+        while height >= 0:
+            if height in self._height_to_hash:
+                locator.append(self._height_to_hash[height])
+
+            if len(locator) >= 10:
+                step *= 2
+
+            height -= step
+
+            # 최대 32개
+            if len(locator) >= 32:
+                break
+
+        return locator
+
     def find_fork_point(self, block_hashes: List[bytes]) -> Tuple[int, bytes]:
         """
         분기점 찾기

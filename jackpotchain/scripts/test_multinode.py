@@ -60,8 +60,8 @@ NODE_CONFIGS = {
     },
 }
 
-# 테스트 주소 (실제로는 지갑에서 생성)
-TEST_MINER_ADDRESS = "JACK1test1234567890abcdefghijklmn"
+# 테스트 주소 (실제 생성된 유효 주소)
+TEST_MINER_ADDRESS = "X6u9TUdcTeaMuLCuSeyGCP5mxczHSdoeMZ"
 
 
 async def run_single_node(node_id: str, data_dir: str = None):
