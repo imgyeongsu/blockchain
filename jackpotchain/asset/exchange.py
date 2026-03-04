@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..script.standard import create_p2pkh_script_pubkey, create_op_return_script
-from ..crypto.address import address_to_pubkey_hash, BURN_ADDRESS
+from ..crypto.address import address_to_pubkey_hash, validate_address, BURN_ADDRESS
 from ..constants import (
     EXCHANGE_RATE,
     TX_VERSION_EXCHANGE,
@@ -77,6 +77,12 @@ def create_exchange_tx(
     result = calculate_exchange(exchange_jack)
     if not result.success:
         return None, result.error
+
+    # 주소 유효성 검증
+    if not validate_address(recipient_address):
+        return None, f"Invalid recipient address: {recipient_address}"
+    if not validate_address(change_address):
+        return None, f"Invalid change address: {change_address}"
 
     # 총 입력 JACK
     total_input = sum(utxo.output.jack_value for _, utxo in inputs)

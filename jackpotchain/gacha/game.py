@@ -21,8 +21,7 @@ from ..script.standard import (
     is_commit_script,
     is_claim_script,
 )
-from ..crypto.address import address_to_pubkey_hash, JACKPOT_POOL_ADDRESS
-from ..crypto.hash import sha256
+from ..crypto.address import address_to_pubkey_hash, validate_address, JACKPOT_POOL_ADDRESS
 from ..constants import (
     TX_VERSION_GACHA_COMMIT,
     TX_VERSION_LOTTO_CLAIM,
@@ -129,6 +128,13 @@ class LottoGame:
             for d in chosen_numbers:
                 if not (0 <= d < LOTTO_DIGIT_BASE):
                     return None, b'', b'', [], f"Each number must be 0~{LOTTO_DIGIT_BASE - 1}"
+
+        # 주소 유효성 검증
+        effective_address = change_address or player_address
+        if not validate_address(player_address):
+            return None, b'', b'', 0, f"Invalid player address: {player_address}"
+        if change_address and not validate_address(change_address):
+            return None, b'', b'', 0, f"Invalid change address: {change_address}"
 
         # Commit 생성
         commit_hash, nonce, chosen_numbers = generate_commit(chosen_numbers)
@@ -272,6 +278,12 @@ class LottoGame:
         # Commit 검증
         if not verify_commit(commit_hash, nonce, chosen_numbers):
             return None, "Invalid commit verification"
+
+        # 주소 유효성 검증
+        if not validate_address(player_address):
+            return None, f"Invalid player address: {player_address}"
+        if change_address and not validate_address(change_address):
+            return None, f"Invalid change address: {change_address}"
 
         # 입력 생성
         tx_inputs = [inp for inp, _ in inputs]
