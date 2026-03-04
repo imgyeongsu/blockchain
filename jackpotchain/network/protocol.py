@@ -241,6 +241,75 @@ class GetBlocksMessage:
         return cls(version, block_locator, hash_stop)
 
 
+@dataclass
+class NetAddress:
+    """네트워크 주소 (ADDR 메시지용)"""
+    timestamp: int = 0              # 마지막으로 본 시간
+    services: int = 1               # 서비스 플래그
+    ip: bytes = b'\x00' * 16        # IPv6 또는 IPv4-mapped (16 bytes)
+    port: int = 8333                # 포트
+
+    def serialize(self) -> bytes:
+        return (
+            struct.pack('<I', self.timestamp) +
+            struct.pack('<Q', self.services) +
+            self.ip +
+            struct.pack('>H', self.port)
+        )
+
+    @classmethod
+    def deserialize(cls, data: bytes, offset: int = 0) -> Tuple['NetAddress', int]:
+        timestamp = struct.unpack('<I', data[offset:offset+4])[0]
+        offset += 4
+        services = struct.unpack('<Q', data[offset:offset+8])[0]
+        offset += 8
+        ip = data[offset:offset+16]
+        offset += 16
+        port = struct.unpack('>H', data[offset:offset+2])[0]
+        offset += 2
+        return cls(timestamp, services, ip, port), offset
+
+    @classmethod
+    def from_ipv4(cls, ip_str: str, port: int, timestamp: int = 0, services: int = 1) -> 'NetAddress':
+        """IPv4 문자열에서 생성"""
+        parts = [int(p) for p in ip_str.split('.')]
+        # IPv4-mapped IPv6: ::ffff:a.b.c.d
+        ip_bytes = b'\x00' * 10 + b'\xff\xff' + bytes(parts)
+        return cls(timestamp, services, ip_bytes, port)
+
+    def to_ipv4(self) -> Optional[str]:
+        """IPv4 문자열로 변환"""
+        # IPv4-mapped 확인
+        if self.ip[:12] == b'\x00' * 10 + b'\xff\xff':
+            return '.'.join(str(b) for b in self.ip[12:16])
+        return None
+
+
+@dataclass
+class AddrMessage:
+    """ADDR 메시지 - 피어 주소 목록"""
+    addresses: List[NetAddress] = field(default_factory=list)
+
+    def serialize(self) -> bytes:
+        from ..core.transaction import encode_varint
+        result = encode_varint(len(self.addresses))
+        for addr in self.addresses:
+            result += addr.serialize()
+        return result
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> 'AddrMessage':
+        from ..core.transaction import decode_varint
+        count, offset = decode_varint(data, 0)
+        # 최대 1000개 제한
+        count = min(count, 1000)
+        addresses = []
+        for _ in range(count):
+            addr, offset = NetAddress.deserialize(data, offset)
+            addresses.append(addr)
+        return cls(addresses)
+
+
 def create_message(msg_type: MessageType, payload: bytes) -> bytes:
     """완전한 메시지 생성"""
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]

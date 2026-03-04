@@ -12,10 +12,11 @@ from dataclasses import dataclass
 from .protocol import (
     MessageType, MessageHeader,
     VersionMessage, InvMessage, InvItem, InvType,
-    GetDataMessage, GetBlocksMessage,
+    GetDataMessage, GetBlocksMessage, AddrMessage, NetAddress,
     create_message, parse_message,
 )
 from .peer import PeerManager, PeerAddress, PeerState, PeerInfo
+from .discovery import PeerDiscovery
 from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
@@ -31,6 +32,8 @@ class NodeConfig:
     max_outbound: int = 6
     max_inbound: int = 2
     relay: bool = True
+    data_dir: str = None  # 피어 캐시 저장 경로
+    discovery_interval: int = 1800  # 피어 발견 주기 (30분)
 
 
 class Node:
@@ -50,6 +53,9 @@ class Node:
             max_inbound=self.config.max_inbound
         )
 
+        # 피어 발견
+        self.discovery = PeerDiscovery(self.config.data_dir)
+
         # 연결 (PeerAddress -> (reader, writer))
         self._connections: Dict[PeerAddress, tuple] = {}
 
@@ -61,6 +67,9 @@ class Node:
         self._running = False
         self._server = None
         self._nonce = int(time.time() * 1000) % (2**64)
+
+        # GETADDR 요청 시간 추적 (스팸 방지)
+        self._last_getaddr: Dict[PeerAddress, float] = {}
 
     @property
     def height(self) -> int:
@@ -78,6 +87,11 @@ class Node:
         """노드 시작"""
         self._running = True
 
+        # 피어 발견 초기화
+        initial_peers = self.discovery.initialize()
+        for addr in initial_peers:
+            self.peer_manager.add_peer_address(addr)
+
         # 서버 시작
         self._server = await asyncio.start_server(
             self._handle_inbound,
@@ -88,9 +102,15 @@ class Node:
         # 연결 유지 태스크
         asyncio.create_task(self._maintain_connections())
 
+        # 피어 발견 태스크
+        asyncio.create_task(self._discovery_loop())
+
     async def stop(self):
         """노드 정지"""
         self._running = False
+
+        # 피어 캐시 저장
+        self.discovery.save()
 
         if self._server:
             self._server.close()
@@ -208,6 +228,10 @@ class Node:
             await self._handle_getblocks(address, payload)
         elif cmd == b'getheaders':
             await self._handle_getheaders(address, payload)
+        elif cmd == b'getaddr':
+            await self._handle_getaddr(address)
+        elif cmd == b'addr':
+            await self._handle_addr(address, payload)
 
     async def _handle_version(self, address: PeerAddress, payload: bytes):
         """VERSION 메시지 처리"""
@@ -227,6 +251,12 @@ class Node:
     async def _handle_verack(self, address: PeerAddress):
         """VERACK 메시지 처리"""
         self.peer_manager.update_peer_state(address, PeerState.READY)
+
+        # 연결 성공 기록
+        self.discovery.mark_good(address)
+
+        # 피어에게 주소 요청
+        await self._send_getaddr(address)
 
     async def _handle_ping(self, address: PeerAddress, payload: bytes):
         """PING 처리"""
@@ -298,6 +328,62 @@ class Node:
         # TODO: HEADERS 응답
         pass
 
+    async def _handle_getaddr(self, address: PeerAddress):
+        """GETADDR 처리 - 알고 있는 피어 주소 전송"""
+        # 스팸 방지: 24시간에 한 번만 응답
+        last = self._last_getaddr.get(address, 0)
+        if time.time() - last < 86400:
+            return
+        self._last_getaddr[address] = time.time()
+
+        # 주소 목록 생성
+        peers = self.discovery.get_addr_to_send(count=1000)
+        if not peers:
+            return
+
+        addresses = []
+        for peer in peers:
+            net_addr = NetAddress.from_ipv4(
+                peer.ip, peer.port,
+                timestamp=peer.timestamp,
+                services=peer.services
+            )
+            addresses.append(net_addr)
+
+        addr_msg = AddrMessage(addresses=addresses)
+        await self._send_message(address, MessageType.ADDR, addr_msg.serialize())
+
+    async def _handle_addr(self, address: PeerAddress, payload: bytes):
+        """ADDR 처리 - 피어 주소 수신"""
+        try:
+            addr_msg = AddrMessage.deserialize(payload)
+        except Exception:
+            return
+
+        # 주소 변환 및 저장
+        new_addresses = []
+        for net_addr in addr_msg.addresses:
+            ip_str = net_addr.to_ipv4()
+            if ip_str:
+                peer_addr = PeerAddress(
+                    ip=ip_str,
+                    port=net_addr.port,
+                    services=net_addr.services,
+                    timestamp=net_addr.timestamp
+                )
+                new_addresses.append(peer_addr)
+
+        # 피어 발견에 추가
+        self.discovery.add_addresses(new_addresses)
+
+        # 피어 매니저에도 추가
+        for addr in new_addresses:
+            self.peer_manager.add_peer_address(addr)
+
+    async def _send_getaddr(self, address: PeerAddress):
+        """GETADDR 전송"""
+        await self._send_message(address, MessageType.GETADDR, b'')
+
     async def _send_version(self, address: PeerAddress):
         """VERSION 전송"""
         version_msg = VersionMessage(
@@ -346,11 +432,44 @@ class Node:
         while self._running:
             # 필요하면 새 연결 시도
             if self.peer_manager.can_connect_outbound():
+                # 먼저 피어 매니저에서 가져오기
                 to_connect = self.peer_manager.get_peers_to_connect(1)
+
+                # 없으면 discovery에서 가져오기
+                if not to_connect:
+                    connected = set(str(a) for a in self._connections.keys())
+                    to_connect = self.discovery.get_peers_to_connect(
+                        count=1, exclude=connected
+                    )
+
                 for addr in to_connect:
+                    self.discovery.mark_attempt(addr)
                     await self.connect_to_peer(addr)
 
             await asyncio.sleep(30)
+
+    async def _discovery_loop(self):
+        """주기적 피어 발견"""
+        # 첫 실행은 5분 후
+        await asyncio.sleep(300)
+
+        while self._running:
+            try:
+                # 연결된 피어 중 랜덤하게 GETADDR 요청
+                ready_peers = self.peer_manager.get_connected_peers()
+                if ready_peers:
+                    import random
+                    target = random.choice(ready_peers)
+                    await self._send_getaddr(target.address)
+
+                # 캐시 저장
+                self.discovery.save()
+
+            except Exception:
+                pass
+
+            # 다음 발견까지 대기
+            await asyncio.sleep(self.config.discovery_interval)
 
     async def broadcast_block(self, block: Block):
         """블록 브로드캐스트"""
