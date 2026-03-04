@@ -1,65 +1,95 @@
 """
-Step 7.3: 가챠 게임 로직
-- 전체 게임 흐름 관리
-- TX 생성 및 검증
+로또 게임 로직 (16-2 Final)
+
+Flow:
+1. Commit TX (v3): 6자리 숫자 선택 + 1 POT 참가비
+2. 30블록 대기 (N+30까지)
+3. Claim TX (v5): 6개 블록 해시와 비교하여 등급 판정 및 보상 수령
 """
 
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Callable
 from dataclasses import dataclass
 
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..script.standard import (
     create_p2pkh_script_pubkey,
     create_commit_script,
-    create_reveal_script,
+    create_claim_script,
     extract_commit_hash,
-    extract_reveal_data,
+    extract_commit_data,
+    extract_claim_data,
     is_commit_script,
-    is_reveal_script,
+    is_claim_script,
 )
 from ..crypto.address import address_to_pubkey_hash, JACKPOT_POOL_ADDRESS
+from ..crypto.hash import sha256
 from ..constants import (
     TX_VERSION_GACHA_COMMIT,
-    TX_VERSION_GACHA_REVEAL,
-    GACHA_COST_POT,
+    TX_VERSION_LOTTO_CLAIM,
+    LOTTO_COST_POT,
+    LOTTO_DIGIT_COUNT,
+    LOTTO_DIGIT_BASE,
+    LOTTO_COMPARISON_OFFSETS,
+    LOTTO_PRIZE_6TH_POT,
     ASSET_ID_POT,
+    ASSET_ID_JACK,
+    COIN,
 )
 from .pool import JackpotPool
 from .commit_reveal import (
     generate_commit,
     verify_commit,
-    calculate_winning_slot,
-    check_win,
-    is_reveal_valid,
+    calculate_result_digits,
+    count_matches,
+    determine_prize,
+    calculate_payout,
+    get_comparison_heights,
+    is_claim_valid,
     CommitRecord,
     CommitStore,
     CommitStatus,
+    LottoPrize,
     get_commit_status,
 )
 
 
 @dataclass
-class GachaPlayResult:
-    """가챠 플레이 결과"""
-    won: bool
-    payout: int = 0
-    winning_slot: int = 0
-    target_slot: int = 0
+class LottoPlayResult:
+    """로또 플레이 결과"""
+    success: bool
+    matches: int = 0
+    prize: LottoPrize = LottoPrize.NONE
+    payout_jack: int = 0        # JACK 보상
+    payout_pot: int = 0         # POT 보상 (6등)
+    chosen_numbers: List[int] = None
+    result_digits: List[int] = None
+    error: str = ""
 
 
-class GachaGame:
+class LottoGame:
     """
-    가챠 게임 관리
+    로또 게임 관리 (16-2 Final)
 
     Flow:
-    1. Commit TX: hash(nonce + target) 제출 + 1 POT 비용
-    2. 2+ 블록 대기
-    3. Reveal TX: nonce 공개 → 당첨 여부 결정
+    1. Commit TX: 6자리 숫자 제출 + 1 POT 비용
+    2. 30+ 블록 대기 (비교 블록 생성 대기)
+    3. Claim TX: 결과 확정 + 보상 수령
     """
 
-    def __init__(self, pool: JackpotPool = None, store: CommitStore = None):
+    def __init__(
+        self,
+        pool: JackpotPool = None,
+        store: CommitStore = None,
+        get_block_hash: Callable[[int], bytes] = None
+    ):
         self.pool = pool or JackpotPool()
         self.store = store or CommitStore()
+        # 블록 해시 조회 함수 (체인에서 주입)
+        self._get_block_hash = get_block_hash
+
+    def set_block_hash_getter(self, getter: Callable[[int], bytes]):
+        """블록 해시 조회 함수 설정"""
+        self._get_block_hash = getter
 
     # =========================================================================
     # Commit Phase
@@ -67,27 +97,41 @@ class GachaGame:
 
     def create_commit_tx(
         self,
-        inputs: list,           # List of (TxInput, UTXO)
+        inputs: list,               # List of (TxInput, UTXO)
         player_address: str,
-        target: int = None,     # 목표 슬롯 (0-99)
+        chosen_numbers: List[int] = None,
         change_address: str = None
-    ) -> Tuple[Optional[Transaction], bytes, bytes, int, str]:
+    ) -> Tuple[Optional[Transaction], bytes, bytes, List[int], str]:
         """
         Commit TX 생성
 
+        Args:
+            inputs: UTXO 입력들
+            player_address: 플레이어 주소
+            chosen_numbers: 6자리 숫자 (None이면 랜덤)
+            change_address: 잔돈 주소
+
         Returns:
-            (tx, commit_hash, nonce, target, error)
+            (tx, commit_hash, nonce, chosen_numbers, error)
         """
         # 입력 중 POT 잔액 확인
         total_pot = 0
         for _, utxo in inputs:
             total_pot += utxo.output.assets.get(ASSET_ID_POT, 0)
 
-        if total_pot < GACHA_COST_POT:
-            return None, b'', b'', 0, f"Insufficient POT: {total_pot} < {GACHA_COST_POT}"
+        if total_pot < LOTTO_COST_POT:
+            return None, b'', b'', [], f"Insufficient POT: {total_pot} < {LOTTO_COST_POT}"
+
+        # 숫자 유효성 검사
+        if chosen_numbers is not None:
+            if len(chosen_numbers) != LOTTO_DIGIT_COUNT:
+                return None, b'', b'', [], f"Must choose exactly {LOTTO_DIGIT_COUNT} numbers"
+            for d in chosen_numbers:
+                if not (0 <= d < LOTTO_DIGIT_BASE):
+                    return None, b'', b'', [], f"Each number must be 0~{LOTTO_DIGIT_BASE - 1}"
 
         # Commit 생성
-        commit_hash, nonce, target = generate_commit(target)
+        commit_hash, nonce, chosen_numbers = generate_commit(chosen_numbers)
 
         # 입력 생성
         tx_inputs = [inp for inp, _ in inputs]
@@ -95,15 +139,15 @@ class GachaGame:
         # 출력 생성
         outputs = []
 
-        # 1. Commit OP_RETURN
+        # 1. Commit OP_RETURN (숫자 배열 포함)
         commit_output = TxOutput(
             jack_value=0,
-            script_pubkey=create_commit_script(commit_hash)
+            script_pubkey=create_commit_script(commit_hash, chosen_numbers)
         )
         outputs.append(commit_output)
 
         # 2. POT 잔돈 (있으면)
-        pot_change = total_pot - GACHA_COST_POT
+        pot_change = total_pot - LOTTO_COST_POT
         if pot_change > 0:
             change_addr = change_address or player_address
             change_pubkey_hash = address_to_pubkey_hash(change_addr)
@@ -132,26 +176,33 @@ class GachaGame:
             locktime=0
         )
 
-        return tx, commit_hash, nonce, target, ""
+        return tx, commit_hash, nonce, chosen_numbers, ""
 
     def validate_commit_tx(self, tx: Transaction) -> Tuple[bool, str]:
         """Commit TX 검증"""
         if tx.version != TX_VERSION_GACHA_COMMIT:
             return False, "Invalid TX version"
 
-        # Commit OP_RETURN 찾기
+        # Commit 데이터 확인
         commit_found = False
         for out in tx.outputs:
             if is_commit_script(out.script_pubkey):
-                commit_hash = extract_commit_hash(out.script_pubkey)
-                if commit_hash and len(commit_hash) == 32:
-                    commit_found = True
-                    break
+                data = extract_commit_data(out.script_pubkey)
+                if data:
+                    commit_hash, chosen_numbers = data
+                    if len(commit_hash) == 32:
+                        # 숫자 배열 검증 (있으면)
+                        if chosen_numbers and len(chosen_numbers) == LOTTO_DIGIT_COUNT:
+                            if all(0 <= d < LOTTO_DIGIT_BASE for d in chosen_numbers):
+                                commit_found = True
+                                break
+                        elif not chosen_numbers:
+                            # 숫자 없이 해시만 있는 경우도 허용 (레거시)
+                            commit_found = True
+                            break
 
         if not commit_found:
-            return False, "No valid commit hash found"
-
-        # POT 비용은 입력에서 차감됨 (UTXOSet에서 검증)
+            return False, "No valid commit data found"
 
         return True, ""
 
@@ -160,46 +211,66 @@ class GachaGame:
         tx: Transaction,
         player_address: str,
         block_height: int,
-        target: int = 0  # target은 Reveal에서 알 수 있음
+        pool_balance: int = 0
     ):
-        """Commit 처리 (블록 적용 시)"""
-        commit_hash = None
+        """
+        Commit 처리 (블록 적용 시)
+
+        Args:
+            tx: Commit TX
+            player_address: 플레이어 주소
+            block_height: 블록 높이
+            pool_balance: 현재 풀 잔액 (스냅샷용)
+        """
         for out in tx.outputs:
             if is_commit_script(out.script_pubkey):
-                commit_hash = extract_commit_hash(out.script_pubkey)
-                break
+                data = extract_commit_data(out.script_pubkey)
+                if data:
+                    commit_hash, chosen_numbers = data
 
-        if commit_hash:
-            record = CommitRecord(
-                commit_hash=commit_hash,
-                player_address=player_address,
-                commit_height=block_height,
-                commit_tx_id=tx.get_txid(),
-                target=target
-            )
-            self.store.add_commit(record)
+                    record = CommitRecord(
+                        commit_hash=commit_hash,
+                        player_address=player_address,
+                        commit_height=block_height,
+                        commit_tx_id=tx.get_txid(),
+                        chosen_numbers=chosen_numbers,
+                        pool_snapshot=pool_balance
+                    )
+                    self.store.add_commit(record)
+
+                    # 풀 스냅샷 저장
+                    self.pool.take_snapshot(block_height)
+                    break
 
     # =========================================================================
-    # Reveal Phase
+    # Claim Phase
     # =========================================================================
 
-    def create_reveal_tx(
+    def create_claim_tx(
         self,
-        inputs: list,           # List of (TxInput, UTXO)
+        inputs: list,               # List of (TxInput, UTXO)
         commit_hash: bytes,
         nonce: bytes,
-        target: int,
+        chosen_numbers: List[int],
         player_address: str,
         change_address: str = None
     ) -> Tuple[Optional[Transaction], str]:
         """
-        Reveal TX 생성
+        Claim TX 생성
+
+        Args:
+            inputs: UTXO 입력들 (JACK 수수료용)
+            commit_hash: 원래 Commit의 해시
+            nonce: 원래 nonce
+            chosen_numbers: 6자리 숫자
+            player_address: 플레이어 주소
+            change_address: 잔돈 주소
 
         Returns:
             (tx, error)
         """
         # Commit 검증
-        if not verify_commit(commit_hash, nonce, target):
+        if not verify_commit(commit_hash, nonce, chosen_numbers):
             return None, "Invalid commit verification"
 
         # 입력 생성
@@ -208,14 +279,14 @@ class GachaGame:
         # 출력 생성
         outputs = []
 
-        # 1. Reveal OP_RETURN
-        reveal_output = TxOutput(
+        # 1. Claim OP_RETURN
+        claim_output = TxOutput(
             jack_value=0,
-            script_pubkey=create_reveal_script(nonce, target)
+            script_pubkey=create_claim_script(commit_hash, nonce, chosen_numbers)
         )
-        outputs.append(reveal_output)
+        outputs.append(claim_output)
 
-        # 2. JACK 잔돈
+        # 2. JACK 잔돈 (수수료 제외)
         total_jack = sum(utxo.output.jack_value for _, utxo in inputs)
         if total_jack > 0:
             change_addr = change_address or player_address
@@ -226,7 +297,7 @@ class GachaGame:
             ))
 
         tx = Transaction(
-            version=TX_VERSION_GACHA_REVEAL,
+            version=TX_VERSION_LOTTO_CLAIM,
             inputs=tx_inputs,
             outputs=outputs,
             locktime=0
@@ -234,117 +305,244 @@ class GachaGame:
 
         return tx, ""
 
-    def validate_reveal_tx(
+    def validate_claim_tx(
         self,
         tx: Transaction,
         current_height: int
     ) -> Tuple[bool, str]:
-        """Reveal TX 검증"""
-        if tx.version != TX_VERSION_GACHA_REVEAL:
-            return False, "Invalid TX version"
+        """
+        Claim TX 검증
 
-        # Reveal 데이터 추출
-        nonce, target = None, None
+        Args:
+            tx: Claim TX
+            current_height: 현재 블록 높이
+
+        Returns:
+            (is_valid, reason)
+        """
+        if tx.version != TX_VERSION_LOTTO_CLAIM:
+            return False, "Invalid TX version (expected v5)"
+
+        # Claim 데이터 추출
+        claim_data = None
         for out in tx.outputs:
-            if is_reveal_script(out.script_pubkey):
-                result = extract_reveal_data(out.script_pubkey)
-                if result:
-                    nonce, target = result
-                    break
+            if is_claim_script(out.script_pubkey):
+                claim_data = extract_claim_data(out.script_pubkey)
+                break
 
-        if nonce is None:
-            return False, "No valid reveal data found"
+        if claim_data is None:
+            return False, "No valid claim data found"
+
+        commit_hash, nonce, chosen_numbers = claim_data
+
+        # Commit 검증
+        if not verify_commit(commit_hash, nonce, chosen_numbers):
+            return False, "Commit verification failed"
 
         # 대응하는 Commit 찾기
-        from ..crypto.hash import sha256
-        import struct
-        commit_hash = sha256(nonce + struct.pack('B', target))
         commit = self.store.get_commit(commit_hash)
-
         if commit is None:
             return False, "Commit not found"
 
-        # 타이밍 검증
-        valid, reason = is_reveal_valid(commit.commit_height, current_height)
+        # 이미 Claim했는지 확인
+        if commit.claim_height is not None:
+            return False, "Already claimed"
+
+        # 타이밍 검증 (N+30 ~ N+80)
+        valid, reason = is_claim_valid(commit.commit_height, current_height)
         if not valid:
             return False, reason
 
-        # Commit 검증
-        if not verify_commit(commit_hash, nonce, target):
-            return False, "Commit verification failed"
-
         return True, ""
 
-    def process_reveal(
+    def process_claim(
         self,
         tx: Transaction,
-        block_hash: bytes,
-        block_height: int
-    ) -> GachaPlayResult:
+        block_height: int,
+        comparison_block_hashes: List[bytes] = None
+    ) -> LottoPlayResult:
         """
-        Reveal 처리 (당첨 여부 결정)
+        Claim 처리 (결과 판정 + 보상 수령)
+
+        Args:
+            tx: Claim TX
+            block_height: Claim 블록 높이
+            comparison_block_hashes: 6개 비교 블록 해시 (없으면 조회)
 
         Returns:
-            GachaPlayResult
+            LottoPlayResult
         """
-        # Reveal 데이터 추출
-        nonce, target = None, None
+        # Claim 데이터 추출
+        claim_data = None
         for out in tx.outputs:
-            if is_reveal_script(out.script_pubkey):
-                result = extract_reveal_data(out.script_pubkey)
-                if result:
-                    nonce, target = result
-                    break
+            if is_claim_script(out.script_pubkey):
+                claim_data = extract_claim_data(out.script_pubkey)
+                break
 
-        if nonce is None:
-            return GachaPlayResult(won=False)
+        if claim_data is None:
+            return LottoPlayResult(success=False, error="No claim data")
+
+        commit_hash, nonce, chosen_numbers = claim_data
 
         # Commit 찾기
-        from ..crypto.hash import sha256
-        import struct
-        commit_hash = sha256(nonce + struct.pack('B', target))
         commit = self.store.get_commit(commit_hash)
-
         if commit is None:
-            return GachaPlayResult(won=False)
+            return LottoPlayResult(success=False, error="Commit not found")
 
-        # 당첨 슬롯 계산
-        winning_slot = calculate_winning_slot(nonce, block_hash)
+        # 비교 블록 해시 조회
+        if comparison_block_hashes is None:
+            if self._get_block_hash is None:
+                return LottoPlayResult(success=False, error="Block hash getter not set")
 
-        # 당첨 여부
-        won = check_win(target, winning_slot)
+            comparison_heights = get_comparison_heights(commit.commit_height)
+            comparison_block_hashes = []
+            for h in comparison_heights:
+                block_hash = self._get_block_hash(h)
+                if block_hash is None:
+                    return LottoPlayResult(
+                        success=False,
+                        error=f"Comparison block {h} not found"
+                    )
+                comparison_block_hashes.append(block_hash)
 
-        # 지급액
-        payout = 0
-        if won:
-            payout = self.pool.process_payout(block_height, tx.get_txid())
+        if len(comparison_block_hashes) != LOTTO_DIGIT_COUNT:
+            return LottoPlayResult(
+                success=False,
+                error=f"Need {LOTTO_DIGIT_COUNT} block hashes"
+            )
+
+        # 결과 숫자 추출
+        result_digits = calculate_result_digits(comparison_block_hashes)
+
+        # 일치 개수 계산
+        matches = count_matches(chosen_numbers, result_digits)
+
+        # 등급 판정
+        prize = determine_prize(matches)
+
+        # 보상 계산
+        payout_jack = 0
+        payout_pot = 0
+
+        if prize == LottoPrize.JACKPOT:
+            # 1등: Commit 시점 풀 잔액의 50%
+            payout_jack = self.pool.process_jackpot_payout(
+                commit.commit_height,
+                block_height,
+                tx.get_txid()
+            )
+        elif prize == LottoPrize.SIXTH:
+            # 6등: 1 POT 재지급
+            payout_pot = LOTTO_PRIZE_6TH_POT
+        elif prize != LottoPrize.NONE:
+            # 2~5등: 고정 JACK 보상
+            payout_jack = calculate_payout(prize, commit.pool_snapshot)
 
         # 기록 업데이트
-        self.store.update_reveal(
+        self.store.update_claim(
             commit_hash=commit_hash,
-            reveal_height=block_height,
-            reveal_tx_id=tx.get_txid(),
+            claim_height=block_height,
+            claim_tx_id=tx.get_txid(),
             nonce=nonce,
-            result=won
+            result_digits=result_digits,
+            matches=matches,
+            prize=prize,
+            payout=payout_jack or payout_pot
         )
 
-        return GachaPlayResult(
-            won=won,
-            payout=payout,
-            winning_slot=winning_slot,
-            target_slot=target
+        return LottoPlayResult(
+            success=True,
+            matches=matches,
+            prize=prize,
+            payout_jack=payout_jack,
+            payout_pot=payout_pot,
+            chosen_numbers=chosen_numbers,
+            result_digits=result_digits
         )
 
     # =========================================================================
     # 유틸리티
     # =========================================================================
 
-    def get_pending_commits(self, address: str = None) -> List[CommitRecord]:
-        """대기 중인 커밋 조회"""
+    def get_claimable_commits(self, address: str = None, current_height: int = 0) -> List[CommitRecord]:
+        """Claim 가능한 커밋 조회"""
         if address:
             commits = self.store.get_commits_by_address(address)
-            return [c for c in commits if c.reveal_height is None]
-        return self.store.get_pending_commits(0)  # 높이는 나중에 필터링
+            return [
+                c for c in commits
+                if get_commit_status(c, current_height) == CommitStatus.CLAIMABLE
+            ]
+        return self.store.get_claimable_commits(current_height)
+
+    def get_pending_commits(self, address: str = None, current_height: int = 0) -> List[CommitRecord]:
+        """대기 중인 커밋 조회 (PENDING + CLAIMABLE)"""
+        if address:
+            commits = self.store.get_commits_by_address(address)
+            return [c for c in commits if c.claim_height is None]
+        return self.store.get_pending_commits(current_height)
+
+    def check_result(
+        self,
+        commit_hash: bytes,
+        current_height: int
+    ) -> Optional[LottoPlayResult]:
+        """
+        결과 미리보기 (Claim 전)
+
+        Args:
+            commit_hash: Commit 해시
+            current_height: 현재 블록 높이
+
+        Returns:
+            LottoPlayResult (Claim 안 해도 결과 확인 가능)
+        """
+        commit = self.store.get_commit(commit_hash)
+        if commit is None:
+            return None
+
+        # 비교 블록이 모두 생성되었는지 확인
+        comparison_heights = get_comparison_heights(commit.commit_height)
+        if current_height < comparison_heights[-1]:
+            return LottoPlayResult(
+                success=False,
+                error=f"Wait until block {comparison_heights[-1]}"
+            )
+
+        if self._get_block_hash is None:
+            return LottoPlayResult(success=False, error="Block hash getter not set")
+
+        # 비교 블록 해시 조회
+        comparison_block_hashes = []
+        for h in comparison_heights:
+            block_hash = self._get_block_hash(h)
+            if block_hash is None:
+                return LottoPlayResult(success=False, error=f"Block {h} not found")
+            comparison_block_hashes.append(block_hash)
+
+        # 결과 계산
+        result_digits = calculate_result_digits(comparison_block_hashes)
+        matches = count_matches(commit.chosen_numbers, result_digits)
+        prize = determine_prize(matches)
+
+        # 예상 보상 계산
+        payout_jack = 0
+        payout_pot = 0
+        if prize == LottoPrize.JACKPOT:
+            payout_jack = self.pool.calculate_jackpot_payout(commit.commit_height)
+        elif prize == LottoPrize.SIXTH:
+            payout_pot = LOTTO_PRIZE_6TH_POT
+        elif prize != LottoPrize.NONE:
+            payout_jack = calculate_payout(prize, commit.pool_snapshot)
+
+        return LottoPlayResult(
+            success=True,
+            matches=matches,
+            prize=prize,
+            payout_jack=payout_jack,
+            payout_pot=payout_pot,
+            chosen_numbers=commit.chosen_numbers,
+            result_digits=result_digits
+        )
 
     def get_stats(self) -> dict:
         """게임 통계"""
@@ -353,3 +551,12 @@ class GachaGame:
             **pool_stats,
             'pending_commits': len(self.get_pending_commits()),
         }
+
+
+# =============================================================================
+# 하위 호환 (deprecated)
+# =============================================================================
+
+# 기존 GachaGame 별칭
+GachaGame = LottoGame
+GachaPlayResult = LottoPlayResult

@@ -59,23 +59,55 @@ MAX_MONEY = 21_000_000_00_000_000  # 이론적 최대값 (무제한이지만 안
 COIN = 100_000_000               # 1 JACK = 10^8 satoshi
 
 # =============================================================================
-# 가챠 파라미터
+# 로또 파라미터 (16-2 Final 기준)
 # =============================================================================
-GACHA_COST_POT = 1_00_000_000    # 1 POT (satoshi 단위)
-GACHA_WIN_PROBABILITY = 0.01     # 1% 당첨 확률
-GACHA_PAYOUT_RATIO = 0.60        # 잭팟 풀의 60% 지급
-GACHA_MIN_REVEAL_GAP = 2         # 최소 블록 간격
-GACHA_MAX_REVEAL_GAP = 50        # Reveal 기한 (블록)
+# 참가비
+LOTTO_COST_JACK = 100 * COIN     # 100 JACK (→ 1 POT 교환)
+LOTTO_COST_POT = 1 * COIN        # 1 POT (Commit TX 참가비)
+GACHA_COST_POT = LOTTO_COST_POT  # 하위 호환
+
+# 숫자 선택
+LOTTO_DIGIT_COUNT = 6            # 6자리
+LOTTO_DIGIT_BASE = 16            # hex 0x0 ~ 0xf
+
+# 비교 블록
+LOTTO_BLOCK_INTERVAL = 5         # 비교 블록 간격
+LOTTO_COMPARISON_OFFSETS = [5, 10, 15, 20, 25, 30]  # N+5, N+10, ..., N+30
+
+# Claim 윈도우
+LOTTO_MIN_CLAIM_GAP = 30         # N+30 이후 Claim 가능
+LOTTO_MAX_CLAIM_GAP = 80         # N+80까지 Claim 가능 (50블록 여유)
+GACHA_MIN_REVEAL_GAP = LOTTO_MIN_CLAIM_GAP  # 하위 호환
+GACHA_MAX_REVEAL_GAP = LOTTO_MAX_CLAIM_GAP  # 하위 호환
+
+# 참가비 분배 (100 JACK 기준)
+LOTTO_POOL_RATIO = 0.80          # 80% → 잭팟 풀
+LOTTO_BURN_RATIO = 0.19          # 19% → 소각
+LOTTO_MINER_RATIO = 0.01         # 1% → 채굴자 보상
+
+# 등급별 보상
+LOTTO_PRIZE_1ST_RATIO = 0.50     # 1등: 잭팟 풀의 50%
+LOTTO_PRIZE_2ND = 100_000 * COIN # 2등: 100,000 JACK
+LOTTO_PRIZE_3RD = 20_000 * COIN  # 3등: 20,000 JACK
+LOTTO_PRIZE_4TH = 2_000 * COIN   # 4등: 2,000 JACK
+LOTTO_PRIZE_5TH = 300 * COIN     # 5등: 300 JACK
+LOTTO_PRIZE_6TH_POT = 1 * COIN   # 6등: 1 POT 재지급
+
+# 하위 호환 (deprecated)
+GACHA_WIN_PROBABILITY = 1 / (16 ** 6)  # 1등 확률 참고용
+GACHA_PAYOUT_RATIO = LOTTO_PRIZE_1ST_RATIO
 
 # =============================================================================
 # TX 버전
 # =============================================================================
 TX_VERSION_TRANSFER = 1          # 일반 전송
 TX_VERSION_EXCHANGE = 2          # JACK → POT 교환
-TX_VERSION_GACHA_COMMIT = 3      # 가챠 Commit
-TX_VERSION_GACHA_REVEAL = 4      # 가챠 Reveal
+TX_VERSION_GACHA_COMMIT = 3      # 가챠 Commit (= 로또 Commit)
+TX_VERSION_GACHA_REVEAL = 4      # 가챠 Reveal (deprecated)
+TX_VERSION_LOTTO_CLAIM = 5       # 로또 Claim (신규)
 TX_VERSION_COMMIT = TX_VERSION_GACHA_COMMIT   # 별칭
-TX_VERSION_REVEAL = TX_VERSION_GACHA_REVEAL   # 별칭
+TX_VERSION_REVEAL = TX_VERSION_GACHA_REVEAL   # 별칭 (deprecated)
+TX_VERSION_CLAIM = TX_VERSION_LOTTO_CLAIM     # 별칭
 
 # =============================================================================
 # 시퀀스 번호

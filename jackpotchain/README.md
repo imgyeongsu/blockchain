@@ -51,7 +51,8 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 - Wallet: `getbalance`, `getnewaddress`, `listunspent`, `sendtoaddress`
 - Network: `getnetworkinfo`, `getpeerinfo`
 - Mining: `getmininginfo`
-- Gacha: `getgachainfo`, `getjackpotpool`, `getgachatypes`, `gachacommit`, `gachareveal`, `listgachacommits`
+- Lotto (16-2 Final): `getlottoinfo`, `getjackpotpool`, `lottocommit`, `lottoclaim`, `lottocheckresult`, `listlottocommits`
+- Legacy (deprecated): `getgachainfo`, `gachacommit`, `gachareveal`, `listgachacommits`
 - Utility: `help`
 
 ## 4. 개발 현황 (DEVELOPMENT_STATUS.md 반영 + 코드 대조)
@@ -77,26 +78,33 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 - `setup.py` entry point가 `cli.main:main`
   - 패키지 기준 `jackpotchain.cli.main:main`이 맞음
 
-## 5. learning-roadmap 대비 차이 (중요)
+## 5. learning-roadmap 대비 차이
 
-### 5.1 가챠: 로드맵 최신 Final(16-2)과 현재 구현 차이
-로드맵 Final(16-2)은 "로또형 6자리 + 6개 블록 비교 + Claim(v5)" 모델이지만,
-현재 코드는 기존 Commit-Reveal 모델에 가깝습니다.
+### 5.1 로또 시스템: 16-2 Final 동기화 완료 ✅
 
-현재 코드(`jackpotchain/gacha/*`, `constants.py`) 기준:
-- Commit: `hash(nonce + target)` (target 0~99)
-- Reveal: 최소 2블록, 최대 50블록 내 공개
-- 당첨판정: `winning_slot(0~99)` 일치 여부(1%)
-- 보상: 잭팟풀의 60% (`GACHA_PAYOUT_RATIO=0.60`)
-- TX 버전: Commit=3, Reveal=4
+현재 코드는 로드맵 Final(16-2) "로또형 6자리 + 6개 블록 비교 + Claim(v5)" 모델과 동기화되었습니다.
 
-로드맵 Final(16-2) 기준 요구와의 불일치:
-- 불일치 1: 6자리 hex 숫자/6개 참조 블록(N+5..N+30) 비교 미구현
-- 불일치 2: Claim TX(version 5) 기반 구조 미구현
-- 불일치 3: 등수별 고정 보상표(1~6등) 미구현
-- 불일치 4: 1등 보상을 Commit 시점 풀 스냅샷 50%로 계산하는 규칙 미구현
-- 불일치 5: Claim 윈도우 N+30~N+80 규칙 미구현(현재 2~50)
-- 불일치 6: 16.1 문서의 고도화된 치트억제(다중 블록 기반 경제적 억제) 미반영
+현재 구현 (`jackpotchain/gacha/*`, `constants.py`):
+- Commit: 6자리 hex 숫자 배열 [0x0~0xf] 선택
+- Claim: N+30 ~ N+80 블록 내 결과 확정
+- 비교 블록: N+5, N+10, N+15, N+20, N+25, N+30 해시 마지막 자리
+- TX 버전: Commit=3, Claim=5
+
+등급별 보상:
+| 등급 | 일치 | 보상 |
+|------|------|------|
+| 1등 | 6개 | 잭팟 풀 50% (Commit 시점 스냅샷) |
+| 2등 | 5개 | 100,000 JACK |
+| 3등 | 4개 | 20,000 JACK |
+| 4등 | 3개 | 2,000 JACK |
+| 5등 | 2개 | 300 JACK |
+| 6등 | 1개 | 1 POT 재지급 |
+| 꽝 | 0개 | 없음 |
+
+참가비 분배:
+- 80% → 잭팟 풀 적립
+- 19% → 소각 (디플레이션)
+- 1% → 채굴자 보상
 
 ### 5.2 기타 차이
 - 문서상 일부 설명은 최신 코드와 다를 수 있음(예: 가챠 타입/흐름)
@@ -104,21 +112,22 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 
 ## 6. 앞으로 구현해야 할 항목(우선순위)
 
-### P0 (SSOT 정합성)
-1. README 기준으로 가챠 모델 확정
-2. 가챠를 Final(16-2)로 갈지, 현재 Commit-Reveal로 유지할지 결정
-3. 선택한 모델로 `constants`, `gacha`, `rpc`, `tests`, `learning-roadmap` 문서 동기화
+### P0 (SSOT 정합성) ✅ 완료
+1. ~~README 기준으로 가챠 모델 확정~~ → 16-2 Final 채택
+2. ~~가챠를 Final(16-2)로 갈지 결정~~ → 완료
+3. ~~`constants`, `gacha`, `rpc`, `tests` 동기화~~ → 완료
 
 ### P1 (기능 안정화)
-1. `mempool.add_transaction` 호출부를 `add_tx`로 정리
-2. Reorg 시 UTXO disconnect/connect 구현
-3. Sync 헤더 검증 및 저장 완료
-4. RPC confirmations/networkhashps 실제 계산 반영
+1. Reorg 시 UTXO disconnect/connect 구현
+2. Sync 헤더 검증 및 저장 완료
+3. RPC confirmations/networkhashps 실제 계산 반영
+4. 로또 통합 테스트 실행 검증
 
 ### P2 (도메인 확장)
-1. Exchange/가챠 통합 시나리오 테스트 확대
+1. Exchange/로또 통합 시나리오 테스트 확대
 2. Dashboard/TUI, 패키징(PyInstaller/Docker)
 3. 다중 노드 장기 동기화 및 fork 회복 시나리오 테스트
+4. 16.1 문서의 고도화된 치트억제 로깅/모니터링
 
 ## 7. 문서 운영 원칙
 - 이 README를 SSOT로 사용합니다.

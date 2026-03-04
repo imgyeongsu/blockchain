@@ -30,16 +30,29 @@ from ..script.standard import (
 from ..constants import (
     TX_VERSION_GACHA_COMMIT,
     TX_VERSION_GACHA_REVEAL,
+    TX_VERSION_LOTTO_CLAIM,
     GACHA_COST_POT,
+    LOTTO_COST_POT,
     GACHA_WIN_PROBABILITY,
     GACHA_PAYOUT_RATIO,
     GACHA_MIN_REVEAL_GAP,
     GACHA_MAX_REVEAL_GAP,
+    LOTTO_MIN_CLAIM_GAP,
+    LOTTO_MAX_CLAIM_GAP,
+    LOTTO_DIGIT_COUNT,
+    LOTTO_DIGIT_BASE,
     ASSET_ID_POT,
     ASSET_ID_JACK,
     MIN_TX_FEE,
 )
-from .commit_reveal import generate_commit, verify_commit, calculate_winning_slot, check_win
+from .commit_reveal import (
+    generate_commit,
+    verify_commit,
+    calculate_winning_slot,
+    check_win,
+    get_comparison_heights,
+    is_claim_valid,
+)
 from .pool import JackpotPool
 from .game import GachaGame, GachaPlayResult
 
@@ -226,26 +239,30 @@ class HighRiskGacha(GachaType):
 
 @dataclass
 class PendingCommit:
-    """대기 중인 Commit"""
+    """대기 중인 Commit (16-2 Final: 6자리 로또)"""
     commit_hash: bytes
     nonce: bytes
-    target: int
+    chosen_numbers: List[int]           # 6자리 숫자 배열 [0-15, ...]
     address: str
     created_at: float
     tx_id: bytes = b''
     block_height: int = 0
-    gacha_type: str = "standard"
+    pool_snapshot: int = 0              # Commit 시점 풀 잔액
+    gacha_type: str = "lotto"           # 기본값 변경
+    target: int = 0                     # 레거시 호환용
 
     def to_dict(self) -> dict:
         return {
             'commit_hash': self.commit_hash.hex(),
             'nonce': self.nonce.hex(),
-            'target': self.target,
+            'chosen_numbers': self.chosen_numbers,
             'address': self.address,
             'created_at': self.created_at,
             'tx_id': self.tx_id.hex() if self.tx_id else '',
             'block_height': self.block_height,
+            'pool_snapshot': self.pool_snapshot,
             'gacha_type': self.gacha_type,
+            'target': self.target,
         }
 
     @classmethod
@@ -253,12 +270,14 @@ class PendingCommit:
         return cls(
             commit_hash=bytes.fromhex(data['commit_hash']),
             nonce=bytes.fromhex(data['nonce']),
-            target=data['target'],
+            chosen_numbers=data.get('chosen_numbers', []),
             address=data['address'],
             created_at=data['created_at'],
             tx_id=bytes.fromhex(data['tx_id']) if data.get('tx_id') else b'',
             block_height=data.get('block_height', 0),
-            gacha_type=data.get('gacha_type', 'standard'),
+            pool_snapshot=data.get('pool_snapshot', 0),
+            gacha_type=data.get('gacha_type', 'lotto'),
+            target=data.get('target', 0),
         )
 
 
@@ -326,31 +345,41 @@ class GachaService:
         wallet,  # Wallet instance
         utxo_set: UTXOSet,
         current_height: int,
-        target: int = None,
-        gacha_type: str = "standard"
+        chosen_numbers: List[int] = None,
+        target: int = None,             # 레거시 호환
+        gacha_type: str = "lotto"
     ) -> Tuple[Optional[Transaction], Optional[PendingCommit], str]:
         """
-        Commit TX 생성 (지갑 연동)
+        Commit TX 생성 (16-2 Final: 6자리 로또)
+
+        Args:
+            wallet: 지갑 인스턴스
+            utxo_set: UTXO Set
+            current_height: 현재 블록 높이
+            chosen_numbers: 6자리 숫자 배열 [0-15, ...] (None이면 랜덤)
+            target: 레거시 호환용 (무시됨)
+            gacha_type: 가챠 타입
 
         Returns:
             (tx, pending_commit, error)
         """
-        gt = self._gacha_types.get(gacha_type)
-        if not gt:
-            return None, None, f"Unknown gacha type: {gacha_type}"
-
-        if not gt.config.enabled:
-            return None, None, f"Gacha type {gacha_type} is disabled"
+        # 숫자 검증
+        if chosen_numbers is not None:
+            if len(chosen_numbers) != LOTTO_DIGIT_COUNT:
+                return None, None, f"Must choose exactly {LOTTO_DIGIT_COUNT} numbers"
+            for d in chosen_numbers:
+                if not (0 <= d < LOTTO_DIGIT_BASE):
+                    return None, None, f"Each number must be 0-{LOTTO_DIGIT_BASE - 1}"
 
         # POT UTXO 선택
-        cost = gt.config.cost_pot
+        cost = LOTTO_COST_POT
         pot_utxos = self._select_pot_utxos(wallet, utxo_set, cost, current_height)
 
         if not pot_utxos:
             return None, None, f"Insufficient POT balance (need {cost / 1e8} POT)"
 
-        # Commit 생성
-        commit_hash, nonce, actual_target = generate_commit(target)
+        # Commit 생성 (6자리 숫자)
+        commit_hash, nonce, actual_numbers = generate_commit(chosen_numbers)
 
         # TX 입력/출력 생성
         inputs = []
@@ -384,10 +413,10 @@ class GachaService:
         # 출력 생성
         outputs = []
 
-        # 1. Commit OP_RETURN
+        # 1. Commit OP_RETURN (숫자 배열 포함)
         outputs.append(TxOutput(
             jack_value=0,
-            script_pubkey=create_commit_script(commit_hash)
+            script_pubkey=create_commit_script(commit_hash, actual_numbers)
         ))
 
         # 2. POT 잔돈
@@ -432,12 +461,16 @@ class GachaService:
         addresses = wallet.get_addresses()
         player_address = addresses[0] if addresses else ""
 
+        # 풀 잔액 스냅샷
+        pool_snapshot = self.game.pool.balance if self.game else 0
+
         pending = PendingCommit(
             commit_hash=commit_hash,
             nonce=nonce,
-            target=actual_target,
+            chosen_numbers=actual_numbers,
             address=player_address,
             created_at=time.time(),
+            pool_snapshot=pool_snapshot,
             gacha_type=gacha_type
         )
 
@@ -449,8 +482,10 @@ class GachaService:
             event=GachaEvent.COMMIT_CREATED,
             address=player_address,
             commit_hash=commit_hash.hex(),
-            target=actual_target,
-            metadata={'gacha_type': gacha_type}
+            metadata={
+                'gacha_type': gacha_type,
+                'chosen_numbers': actual_numbers
+            }
         ))
 
         return tx, pending, ""
@@ -549,6 +584,111 @@ class GachaService:
             address=pending.address,
             commit_hash=commit_hash.hex(),
             target=pending.target
+        ))
+
+        return tx, ""
+
+    # =========================================================================
+    # Claim 생성 (16-2 Final)
+    # =========================================================================
+
+    def create_claim(
+        self,
+        wallet,
+        utxo_set: UTXOSet,
+        commit_hash: bytes,
+        current_height: int
+    ) -> Tuple[Optional[Transaction], str]:
+        """
+        Claim TX 생성 (16-2 Final)
+
+        Args:
+            wallet: 지갑 인스턴스
+            utxo_set: UTXO Set
+            commit_hash: Commit 해시
+            current_height: 현재 블록 높이
+
+        Returns:
+            (tx, error)
+        """
+        from ..script.standard import create_claim_script
+
+        # 대응하는 PendingCommit 찾기
+        pending = self._find_pending_commit(commit_hash)
+        if not pending:
+            return None, "Pending commit not found"
+
+        # 타이밍 검증 (N+30 ~ N+80)
+        if pending.block_height > 0:
+            valid, reason = is_claim_valid(pending.block_height, current_height)
+            if not valid:
+                return None, reason
+
+        # JACK UTXO 선택 (수수료용)
+        jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height)
+        if not jack_utxos:
+            return None, "Insufficient JACK for fee"
+
+        # TX 입력
+        inputs = []
+        total_jack = 0
+
+        for utxo in jack_utxos:
+            inp = TxInput(
+                prev_tx_id=utxo.tx_id,
+                output_index=utxo.output_index,
+                script_sig=b'',
+                sequence=0xFFFFFFFF
+            )
+            inputs.append((inp, utxo))
+            total_jack += utxo.output.jack_value
+
+        # TX 출력
+        outputs = []
+
+        # 1. Claim OP_RETURN
+        outputs.append(TxOutput(
+            jack_value=0,
+            script_pubkey=create_claim_script(
+                pending.commit_hash,
+                pending.nonce,
+                pending.chosen_numbers
+            )
+        ))
+
+        # 2. JACK 잔돈
+        jack_change = total_jack - MIN_TX_FEE
+        if jack_change > 0:
+            change_addr = wallet.get_change_address()
+            outputs.append(TxOutput(
+                jack_value=jack_change,
+                script_pubkey=create_p2pkh_script_pubkey(address_to_pubkey_hash(change_addr))
+            ))
+
+        # TX 생성
+        tx = Transaction(
+            version=TX_VERSION_LOTTO_CLAIM,
+            inputs=[inp for inp, _ in inputs],
+            outputs=outputs,
+            locktime=0
+        )
+
+        # 서명
+        tx_hash = tx.get_txid()
+        for i, (inp, utxo) in enumerate(inputs):
+            address = self._get_utxo_address(utxo)
+            if address and address in wallet._addresses:
+                info = wallet._addresses[address]
+                signature = sign(tx_hash, info.private_key)
+                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
+                tx.inputs[i].script_sig = inp.script_sig
+
+        # 이벤트
+        self.events.emit(GachaEventData(
+            event=GachaEvent.REVEAL_CREATED,  # CLAIM_CREATED 이벤트 추가 가능
+            address=pending.address,
+            commit_hash=commit_hash.hex(),
+            metadata={'chosen_numbers': pending.chosen_numbers}
         ))
 
         return tx, ""

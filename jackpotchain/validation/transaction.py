@@ -20,6 +20,7 @@ from ..constants import (
     TX_VERSION_EXCHANGE,
     TX_VERSION_COMMIT,
     TX_VERSION_REVEAL,
+    TX_VERSION_LOTTO_CLAIM,
     COINBASE_MATURITY,
 )
 
@@ -110,7 +111,13 @@ def validate_tx_structure(tx: Transaction) -> TxValidationResult:
         seen_outpoints.add(outpoint)
 
     # 버전 검증
-    valid_versions = {TX_VERSION_TRANSFER, TX_VERSION_EXCHANGE, TX_VERSION_COMMIT, TX_VERSION_REVEAL}
+    valid_versions = {
+        TX_VERSION_TRANSFER,
+        TX_VERSION_EXCHANGE,
+        TX_VERSION_COMMIT,
+        TX_VERSION_REVEAL,      # deprecated but still valid
+        TX_VERSION_LOTTO_CLAIM,
+    }
     if tx.version not in valid_versions:
         return TxValidationResult(
             is_valid=False,

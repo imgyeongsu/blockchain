@@ -105,13 +105,19 @@ class RPCServer:
         # Mining
         self._methods['getmininginfo'] = self._getmininginfo
 
-        # Gacha
-        self._methods['getgachainfo'] = self._getgachainfo
+        # Lotto (16-2 Final)
+        self._methods['getlottoinfo'] = self._getlottoinfo
         self._methods['getjackpotpool'] = self._getjackpotpool
-        self._methods['gachacommit'] = self._gachacommit
-        self._methods['gachareveal'] = self._gachareveal
-        self._methods['listgachacommits'] = self._listgachacommits
-        self._methods['getgachatypes'] = self._getgachatypes
+        self._methods['lottocommit'] = self._lottocommit
+        self._methods['lottoclaim'] = self._lottoclaim
+        self._methods['lottocheckresult'] = self._lottocheckresult
+        self._methods['listlottocommits'] = self._listlottocommits
+
+        # Legacy aliases (deprecated)
+        self._methods['getgachainfo'] = self._getlottoinfo
+        self._methods['gachacommit'] = self._lottocommit
+        self._methods['gachareveal'] = self._lottoclaim
+        self._methods['listgachacommits'] = self._listlottocommits
 
         # Utility
         self._methods['help'] = self._help
@@ -425,21 +431,33 @@ class RPCServer:
         }
 
     # =========================================================================
-    # Gacha Methods
+    # Lotto Methods (16-2 Final)
     # =========================================================================
 
-    def _getgachainfo(self) -> dict:
-        """가챠 시스템 정보"""
+    def _getlottoinfo(self) -> dict:
+        """로또 시스템 정보"""
         stats = self.gacha.get_stats()
         return {
+            'system': 'JackpotChain Lotto (16-2 Final)',
             'pool_balance': stats['balance'] / 100_000_000,  # JACK
             'pool_balance_satoshi': stats['balance'],
-            'total_fees_collected': stats['total_fees_collected'],
+            'next_jackpot': stats.get('next_jackpot', stats['balance'] * 0.5) / 100_000_000,
+            'total_entries': stats.get('total_entries', 0),
             'total_payouts': stats['total_payouts'],
             'payout_count': stats['payout_count'],
             'pending_commits': stats['pending_commits'],
-            'win_probability': '1%',
-            'payout_ratio': '60%',
+            'digit_count': 6,
+            'digit_base': 16,
+            'comparison_blocks': 'N+5, N+10, N+15, N+20, N+25, N+30',
+            'claim_window': 'N+30 ~ N+80',
+            'prize_table': {
+                '1st (6 matches)': 'Jackpot Pool 50%',
+                '2nd (5 matches)': '100,000 JACK',
+                '3rd (4 matches)': '20,000 JACK',
+                '4th (3 matches)': '2,000 JACK',
+                '5th (2 matches)': '300 JACK',
+                '6th (1 match)': '1 POT refund',
+            }
         }
 
     def _getjackpotpool(self) -> dict:
@@ -448,38 +466,47 @@ class RPCServer:
         return {
             'balance': pool_stats['balance'] / 100_000_000,
             'balance_satoshi': pool_stats['balance'],
-            'next_payout': pool_stats['balance'] * 0.6 / 100_000_000,
-            'total_collected': pool_stats['total_fees_collected'] / 100_000_000,
+            'next_jackpot': pool_stats['balance'] * 0.5 / 100_000_000,
+            'next_jackpot_satoshi': int(pool_stats['balance'] * 0.5),
+            'total_entries': pool_stats.get('total_entries', 0) / 100_000_000,
+            'total_collected': pool_stats.get('total_fees_collected', 0) / 100_000_000,
+            'snapshot_count': pool_stats.get('snapshot_count', 0),
         }
 
-    async def _gachacommit(self, target: int = None, gacha_type: str = "standard") -> dict:
+    async def _lottocommit(self, chosen_numbers: list = None) -> dict:
         """
-        가챠 참여 (Commit TX 생성 및 전파)
+        로또 참여 (Commit TX 생성 및 전파)
 
         Args:
-            target: 목표 슬롯 (0-99, None이면 랜덤)
-            gacha_type: 가챠 타입 ("standard", "high_risk" 등)
+            chosen_numbers: 6자리 숫자 배열 [0-15, 0-15, ...] (None이면 랜덤)
 
         Returns:
-            {commit_hash, target, tx_id, ...}
+            {commit_hash, chosen_numbers, tx_id, ...}
         """
         if not self.wallet:
             raise Exception("Wallet not available")
+
+        # 숫자 검증
+        if chosen_numbers is not None:
+            if len(chosen_numbers) != 6:
+                raise Exception("Must choose exactly 6 numbers")
+            for d in chosen_numbers:
+                if not (0 <= d <= 15):
+                    raise Exception("Each number must be 0-15 (hex 0x0-0xf)")
 
         # Commit TX 생성
         tx, pending, error = self.gacha_service.create_commit(
             wallet=self.wallet,
             utxo_set=self.blockchain.utxo_set,
             current_height=self.blockchain.get_height(),
-            target=target,
-            gacha_type=gacha_type
+            chosen_numbers=chosen_numbers
         )
 
         if error:
             raise Exception(error)
 
         # Mempool에 추가
-        success, msg = self.mempool.add_transaction(
+        success, msg = self.mempool.add_tx(
             tx,
             self.blockchain.utxo_set,
             self.blockchain.get_height()
@@ -495,43 +522,51 @@ class RPCServer:
         return {
             'success': True,
             'commit_hash': pending.commit_hash.hex(),
-            'target': pending.target,
+            'chosen_numbers': pending.chosen_numbers,
+            'chosen_hex': [hex(n) for n in pending.chosen_numbers],
             'tx_id': tx.get_txid().hex(),
-            'gacha_type': gacha_type,
-            'message': f"Commit created. Wait for 2+ blocks, then call gachareveal with commit_hash."
+            'comparison_blocks': f"N+5, N+10, N+15, N+20, N+25, N+30 (where N = commit block)",
+            'claim_window': "N+30 ~ N+80",
+            'message': "Commit created. Wait for N+30 blocks to claim result."
         }
 
-    async def _gachareveal(self, commit_hash: str) -> dict:
+    async def _lottoclaim(self, commit_hash: str) -> dict:
         """
-        가챠 결과 공개 (Reveal TX 생성 및 전파)
+        로또 결과 확정 및 보상 수령 (Claim TX 생성 및 전파)
 
         Args:
             commit_hash: Commit 해시 (hex)
 
         Returns:
-            {won, winning_slot, target, payout, tx_id, ...}
+            {matches, prize, payout, tx_id, ...}
         """
         if not self.wallet:
             raise Exception("Wallet not available")
 
         commit_hash_bytes = bytes.fromhex(commit_hash)
+        current_height = self.blockchain.get_height()
 
-        # Reveal TX 생성
-        tx, error = self.gacha_service.create_reveal(
+        # 결과 미리 확인
+        preview = self.gacha.check_result(commit_hash_bytes, current_height)
+        if preview and not preview.success:
+            raise Exception(preview.error)
+
+        # Claim TX 생성
+        tx, error = self.gacha_service.create_claim(
             wallet=self.wallet,
             utxo_set=self.blockchain.utxo_set,
             commit_hash=commit_hash_bytes,
-            current_height=self.blockchain.get_height()
+            current_height=current_height
         )
 
         if error:
             raise Exception(error)
 
         # Mempool에 추가
-        success, msg = self.mempool.add_transaction(
+        success, msg = self.mempool.add_tx(
             tx,
             self.blockchain.utxo_set,
-            self.blockchain.get_height()
+            current_height
         )
 
         if not success:
@@ -541,22 +576,62 @@ class RPCServer:
         if self.node:
             await self.node.broadcast_tx(tx)
 
-        # PendingCommit 정보 조회
-        pending = self.gacha_service._find_pending_commit(commit_hash_bytes)
-
-        # 결과 미리보기 (실제 결과는 블록 포함 후 확정)
+        # 결과 반환
         result = {
             'success': True,
             'tx_id': tx.get_txid().hex(),
             'commit_hash': commit_hash,
-            'target': pending.target if pending else 0,
-            'status': 'pending',
-            'message': "Reveal TX broadcast. Result will be determined when included in a block."
+            'chosen_numbers': preview.chosen_numbers if preview else [],
+            'result_digits': preview.result_digits if preview else [],
+            'matches': preview.matches if preview else 0,
+            'prize': preview.prize.name if preview else 'NONE',
+            'payout_jack': preview.payout_jack / 100_000_000 if preview else 0,
+            'payout_pot': preview.payout_pot / 100_000_000 if preview else 0,
+            'message': "Claim TX broadcast. Reward will be credited when included in a block."
         }
 
         return result
 
-    def _listgachacommits(self, address: str = None) -> list:
+    def _lottocheckresult(self, commit_hash: str) -> dict:
+        """
+        로또 결과 미리보기 (Claim 전)
+
+        Args:
+            commit_hash: Commit 해시 (hex)
+
+        Returns:
+            {matches, prize, expected_payout, ...}
+        """
+        commit_hash_bytes = bytes.fromhex(commit_hash)
+        current_height = self.blockchain.get_height()
+
+        result = self.gacha.check_result(commit_hash_bytes, current_height)
+
+        if result is None:
+            raise Exception("Commit not found")
+
+        if not result.success:
+            return {
+                'success': False,
+                'error': result.error,
+                'message': result.error
+            }
+
+        return {
+            'success': True,
+            'chosen_numbers': result.chosen_numbers,
+            'chosen_hex': [hex(n) for n in result.chosen_numbers] if result.chosen_numbers else [],
+            'result_digits': result.result_digits,
+            'result_hex': [hex(n) for n in result.result_digits] if result.result_digits else [],
+            'matches': result.matches,
+            'prize': result.prize.name,
+            'prize_rank': result.prize.value,
+            'expected_payout_jack': result.payout_jack / 100_000_000,
+            'expected_payout_pot': result.payout_pot / 100_000_000,
+            'can_claim': True,
+        }
+
+    def _listlottocommits(self, address: str = None) -> list:
         """
         대기 중인 Commit 목록
 
@@ -564,34 +639,35 @@ class RPCServer:
             address: 특정 주소 (None이면 전체)
 
         Returns:
-            [PendingCommit, ...]
+            [{commit_hash, chosen_numbers, status, ...}, ...]
         """
-        commits = self.gacha_service.get_pending_commits(address)
+        commits = self.gacha.get_pending_commits(address, self.blockchain.get_height())
         current_height = self.blockchain.get_height()
 
-        return [
-            {
+        from ..gacha.commit_reveal import get_commit_status, get_comparison_heights
+
+        result = []
+        for c in commits:
+            comparison_heights = get_comparison_heights(c.commit_height)
+            status = get_commit_status(c, current_height)
+
+            result.append({
                 'commit_hash': c.commit_hash.hex(),
-                'target': c.target,
-                'address': c.address,
-                'block_height': c.block_height,
-                'tx_id': c.tx_id.hex() if c.tx_id else '',
-                'gacha_type': c.gacha_type,
-                'can_reveal': c.block_height > 0 and (current_height - c.block_height) >= 2,
-                'blocks_until_reveal': max(0, 2 - (current_height - c.block_height)) if c.block_height > 0 else 'pending',
-                'created_at': c.created_at,
-            }
-            for c in commits
-        ]
+                'chosen_numbers': c.chosen_numbers,
+                'chosen_hex': [hex(n) for n in c.chosen_numbers] if c.chosen_numbers else [],
+                'player_address': c.player_address,
+                'commit_height': c.commit_height,
+                'tx_id': c.commit_tx_id.hex() if c.commit_tx_id else '',
+                'pool_snapshot': c.pool_snapshot / 100_000_000,
+                'status': status.value,
+                'can_claim': status.value == 'claimable',
+                'comparison_blocks': comparison_heights,
+                'claim_deadline': c.commit_height + 80,
+                'blocks_until_claimable': max(0, (c.commit_height + 30) - current_height),
+                'blocks_until_expire': max(0, (c.commit_height + 80) - current_height),
+            })
 
-    def _getgachatypes(self) -> list:
-        """
-        등록된 가챠 타입 목록
-
-        Returns:
-            [{type_id, config}, ...]
-        """
-        return self.gacha_service.list_gacha_types()
+        return result
 
     # =========================================================================
     # Utility Methods
