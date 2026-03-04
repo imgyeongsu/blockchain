@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from ..core.block import Block, BlockHeader
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..crypto.hash import double_sha256
-from ..crypto.address import address_to_pubkey_hash, is_system_address, JACKPOT_POOL_ADDRESS, BURN_ADDRESS
+from ..crypto.address import address_to_pubkey_hash, validate_address, is_system_address, JACKPOT_POOL_ADDRESS, BURN_ADDRESS
 from ..script.standard import create_p2pkh_script_pubkey
 from ..constants import (
     BLOCK_REWARD,
@@ -73,6 +73,8 @@ def create_coinbase_tx(
     # 1. 채굴자 보상 (블록 보상 + 채굴자 수수료)
     miner_total = BLOCK_REWARD + miner_fee
     if not is_system_address(miner_address):
+        if not validate_address(miner_address):
+            raise ValueError(f"Invalid miner address: {miner_address}")
         miner_pubkey_hash = address_to_pubkey_hash(miner_address)
         miner_script = create_p2pkh_script_pubkey(miner_pubkey_hash)
     else:
