@@ -145,10 +145,10 @@ class LottoGame:
         # 출력 생성
         outputs = []
 
-        # 1. Commit OP_RETURN (숫자 배열 포함)
+        # 1. Commit OP_RETURN (해시만 - 숫자는 로컬 저장)
         commit_output = TxOutput(
             jack_value=0,
-            script_pubkey=create_commit_script(commit_hash, chosen_numbers)
+            script_pubkey=create_commit_script(commit_hash)
         )
         outputs.append(commit_output)
 
@@ -189,23 +189,14 @@ class LottoGame:
         if tx.version != TX_VERSION_GACHA_COMMIT:
             return False, "Invalid TX version"
 
-        # Commit 데이터 확인
+        # Commit 데이터 확인 (해시만 검증 - 숫자는 Claim 시 공개)
         commit_found = False
         for out in tx.outputs:
             if is_commit_script(out.script_pubkey):
-                data = extract_commit_data(out.script_pubkey)
-                if data:
-                    commit_hash, chosen_numbers = data
-                    if len(commit_hash) == 32:
-                        # 숫자 배열 검증 (있으면)
-                        if chosen_numbers and len(chosen_numbers) == LOTTO_DIGIT_COUNT:
-                            if all(0 <= d < LOTTO_DIGIT_BASE for d in chosen_numbers):
-                                commit_found = True
-                                break
-                        elif not chosen_numbers:
-                            # 숫자 없이 해시만 있는 경우도 허용 (레거시)
-                            commit_found = True
-                            break
+                commit_hash = extract_commit_data(out.script_pubkey)
+                if commit_hash and len(commit_hash) == 32:
+                    commit_found = True
+                    break
 
         if not commit_found:
             return False, "No valid commit data found"
@@ -227,19 +218,20 @@ class LottoGame:
             player_address: 플레이어 주소
             block_height: 블록 높이
             pool_balance: 현재 풀 잔액 (스냅샷용)
+
+        Note:
+            숫자는 Commit에 포함되지 않음 (Claim 시 공개)
         """
         for out in tx.outputs:
             if is_commit_script(out.script_pubkey):
-                data = extract_commit_data(out.script_pubkey)
-                if data:
-                    commit_hash, chosen_numbers = data
-
+                commit_hash = extract_commit_data(out.script_pubkey)
+                if commit_hash:
                     record = CommitRecord(
                         commit_hash=commit_hash,
                         player_address=player_address,
                         commit_height=block_height,
                         commit_tx_id=tx.get_txid(),
-                        chosen_numbers=chosen_numbers,
+                        chosen_numbers=[],  # Claim 시 공개됨
                         pool_snapshot=pool_balance
                     )
                     self.store.add_commit(record)
@@ -496,6 +488,7 @@ class LottoGame:
     def check_result(
         self,
         commit_hash: bytes,
+        chosen_numbers: List[int],
         current_height: int
     ) -> Optional[LottoPlayResult]:
         """
@@ -503,14 +496,22 @@ class LottoGame:
 
         Args:
             commit_hash: Commit 해시
+            chosen_numbers: 사용자가 로컬에 저장한 6자리 숫자
             current_height: 현재 블록 높이
 
         Returns:
             LottoPlayResult (Claim 안 해도 결과 확인 가능)
+
+        Note:
+            숫자는 Commit에 포함되지 않으므로 사용자가 제공해야 함
         """
         commit = self.store.get_commit(commit_hash)
         if commit is None:
             return None
+
+        # 숫자 유효성 검사
+        if len(chosen_numbers) != LOTTO_DIGIT_COUNT:
+            return LottoPlayResult(success=False, error="Invalid chosen_numbers length")
 
         # 비교 블록이 모두 생성되었는지 확인
         comparison_heights = get_comparison_heights(commit.commit_height)
@@ -533,7 +534,7 @@ class LottoGame:
 
         # 결과 계산
         result_digits = calculate_result_digits(comparison_block_hashes)
-        matches = count_matches(commit.chosen_numbers, result_digits)
+        matches = count_matches(chosen_numbers, result_digits)
         prize = determine_prize(matches)
 
         # 예상 보상 계산
@@ -552,7 +553,7 @@ class LottoGame:
             prize=prize,
             payout_jack=payout_jack,
             payout_pot=payout_pot,
-            chosen_numbers=commit.chosen_numbers,
+            chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
 

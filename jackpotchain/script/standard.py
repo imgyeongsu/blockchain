@@ -151,24 +151,20 @@ def get_address_from_script_pubkey(script_pubkey: bytes) -> Optional[str]:
 # 로또 Commit (16-2 Final)
 # =============================================================================
 
-def create_commit_script(commit_hash: bytes, chosen_numbers: list = None) -> bytes:
+def create_commit_script(commit_hash: bytes) -> bytes:
     """
     Lotto Commit TX용 OP_RETURN
 
-    Format: OP_RETURN "LOTTO" <commit_hash> [<chosen_numbers>]
+    Format: OP_RETURN "LOTTO" <commit_hash>
 
     Args:
         commit_hash: SHA256(nonce || chosen_numbers) - 32 bytes
-        chosen_numbers: 6자리 숫자 배열 (선택적, 공개 여부 결정)
 
-    Note:
-        16-2 설계에서 숫자는 Commit TX에 포함 (미래 블록 해시로 비교하므로
-        숫자를 알아도 결과 예측 불가)
+    Security:
+        숫자는 Commit에 포함하지 않음 (채굴자 공격 방어)
+        사용자가 nonce + 숫자를 로컬에 저장하고 Claim 시 공개
     """
     data = b'LOTTO' + commit_hash
-    if chosen_numbers is not None:
-        if len(chosen_numbers) == 6:
-            data += bytes(chosen_numbers)
     return create_op_return_script(data)
 
 
@@ -197,27 +193,27 @@ def extract_commit_hash(script: bytes) -> Optional[bytes]:
     return None
 
 
-def extract_commit_data(script: bytes) -> Optional[Tuple[bytes, list]]:
+def extract_commit_data(script: bytes) -> Optional[bytes]:
     """
-    Commit 스크립트에서 (commit_hash, chosen_numbers) 추출
+    Commit 스크립트에서 commit_hash 추출
 
     Returns:
-        (commit_hash, chosen_numbers) or None
+        commit_hash or None
+
+    Note:
+        숫자는 Commit에 포함되지 않음 (Claim 시 공개)
     """
     data = extract_op_return_data(script)
     if data is None:
         return None
 
-    # LOTTO 형식 (신규): "LOTTO" + 32 bytes hash + 6 bytes numbers
+    # LOTTO 형식: "LOTTO" + 32 bytes hash
     if data.startswith(b'LOTTO') and len(data) >= 37:
-        commit_hash = data[5:37]
-        chosen_numbers = list(data[37:43]) if len(data) >= 43 else []
-        return commit_hash, chosen_numbers
+        return data[5:37]
 
     # COMMIT 형식 (레거시): "COMMIT" + 32 bytes hash
     if data.startswith(b'COMMIT') and len(data) >= 38:
-        commit_hash = data[6:38]
-        return commit_hash, []
+        return data[6:38]
 
     return None
 
