@@ -1,0 +1,73 @@
+# JackpotChain Multi-Node Docker Compose
+# Usage: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # Seed Node (mining)
+  seed-node:
+    build: .
+    container_name: jackpot-seed
+    ports:
+      - "8333:8333"  # P2P
+      - "8332:8332"  # RPC
+    volumes:
+      - seed-data:/app/data
+      - seed-wallet:/app/wallet
+    command: >
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
+      --mine --address X6u9TUdcTeaMuLCuSeyGCP5mxczHSdoeMZ
+    networks:
+      - jackpotnet
+    restart: unless-stopped
+
+  # Node 2
+  node2:
+    build: .
+    container_name: jackpot-node2
+    ports:
+      - "8334:8333"  # P2P
+      - "8335:8332"  # RPC
+    volumes:
+      - node2-data:/app/data
+      - node2-wallet:/app/wallet
+    command: >
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
+      --seed seed-node:8333
+    depends_on:
+      - seed-node
+    networks:
+      - jackpotnet
+    restart: unless-stopped
+
+  # Node 3 (mining)
+  node3:
+    build: .
+    container_name: jackpot-node3
+    ports:
+      - "8336:8333"  # P2P
+      - "8337:8332"  # RPC
+    volumes:
+      - node3-data:/app/data
+      - node3-wallet:/app/wallet
+    command: >
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
+      --seed seed-node:8333
+      --mine --address X6u9TUdcTeaMuLCuSeyGCP5mxczHSdoeMZ
+    depends_on:
+      - seed-node
+    networks:
+      - jackpotnet
+    restart: unless-stopped
+
+networks:
+  jackpotnet:
+    driver: bridge
+
+volumes:
+  seed-data:
+  seed-wallet:
+  node2-data:
+  node2-wallet:
+  node3-data:
+  node3-wallet:
