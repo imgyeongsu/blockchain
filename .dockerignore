@@ -1,0 +1,39 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+ENV/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Test
+.pytest_cache
+.coverage
+htmlcov/
+
+# Data (will be mounted as volume)
+data/
+*.db
+peers.json
+
+# Docs (not needed in container)
+*.md
+learning-roadmap/
+docs/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log
