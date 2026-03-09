@@ -176,6 +176,14 @@ class NATManager:
                 self._mapping_result = result
                 return result
 
+        # 5순위: 수동 포트포워딩 감지
+        result = await self._detect_manual_forwarding()
+        if result.success:
+            logger.info(f"수동 포트포워딩 감지: {result.external_ip}:{result.external_port}")
+            self._active_protocol = NATProtocol.MANUAL
+            self._mapping_result = result
+            return result
+
         # 실패
         logger.warning("NAT 포트 매핑 실패 - 아웃바운드 전용 모드로 동작")
         return MappingResult(
@@ -788,6 +796,79 @@ class NATManager:
             protocol=NATProtocol.HOLEPUNCH,
             error="랑데부 서버 연결 실패"
         )
+
+    async def _detect_manual_forwarding(self) -> MappingResult:
+        """수동 포트포워딩 감지 - 외부 IP로 자기 포트에 연결 시도"""
+        try:
+            # 외부 IP 조회
+            external_ip = await self._get_external_ip()
+            if not external_ip:
+                return MappingResult(
+                    success=False,
+                    protocol=NATProtocol.MANUAL,
+                    error="외부 IP 조회 실패"
+                )
+
+            # 외부 IP:포트로 연결 시도 (Hairpin NAT 테스트)
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(external_ip, self.internal_port),
+                    timeout=3.0
+                )
+                writer.close()
+                await writer.wait_closed()
+
+                return MappingResult(
+                    success=True,
+                    protocol=NATProtocol.MANUAL,
+                    external_ip=external_ip,
+                    external_port=self.internal_port,
+                    internal_port=self.internal_port,
+                    lifetime=0
+                )
+            except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
+                return MappingResult(
+                    success=False,
+                    protocol=NATProtocol.MANUAL,
+                    error="포트포워딩 미감지"
+                )
+
+        except Exception as e:
+            return MappingResult(
+                success=False,
+                protocol=NATProtocol.MANUAL,
+                error=f"감지 오류: {e}"
+            )
+
+    async def _get_external_ip(self) -> Optional[str]:
+        """외부 IP 조회 (HTTP)"""
+        services = [
+            ("ifconfig.me", 80, "GET / HTTP/1.1\r\nHost: ifconfig.me\r\nConnection: close\r\n\r\n"),
+            ("api.ipify.org", 80, "GET / HTTP/1.1\r\nHost: api.ipify.org\r\nConnection: close\r\n\r\n"),
+            ("icanhazip.com", 80, "GET / HTTP/1.1\r\nHost: icanhazip.com\r\nConnection: close\r\n\r\n"),
+        ]
+
+        for host, port, request in services:
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port),
+                    timeout=3.0
+                )
+                writer.write(request.encode())
+                await writer.drain()
+
+                response = await asyncio.wait_for(reader.read(1024), timeout=3.0)
+                writer.close()
+                await writer.wait_closed()
+
+                body = response.decode('utf-8', errors='ignore').split('\r\n\r\n', 1)
+                if len(body) > 1:
+                    ip = body[1].strip()
+                    socket.inet_aton(ip)
+                    return ip
+            except Exception:
+                continue
+        return None
 
     def _start_refresh_task(self):
         """매핑 갱신 태스크 시작"""

@@ -134,11 +134,21 @@ class Node:
             await self._rendezvous_server.start(self.config.host)
             print(f"[Rendezvous] 랑데부 서버 시작 - 포트 {self.config.rendezvous_port}")
 
-        # NAT 자동 포트 매핑 (PCP → NAT-PMP → UPnP → HolePunch → 실패)
+        # 서버 먼저 시작 (수동 포트포워딩 감지에 필요)
+        self._server = await asyncio.start_server(
+            self._handle_inbound,
+            self.config.host,
+            self.config.port
+        )
+
+        # NAT 포트 매핑 (PCP → NAT-PMP → UPnP → HolePunch → 수동 감지 → 실패)
         if self.nat_manager:
             nat_result = await self.nat_manager.setup_port_mapping()
             if nat_result.success:
-                print(f"[NAT] 포트 매핑 성공: {nat_result.external_ip}:{nat_result.external_port} ({nat_result.protocol.value})")
+                if nat_result.protocol == NATProtocol.MANUAL:
+                    print(f"[NAT] 수동 포트포워딩 감지 - 인바운드 가능 ({nat_result.external_ip}:{nat_result.external_port})")
+                else:
+                    print(f"[NAT] 포트 매핑 성공: {nat_result.external_ip}:{nat_result.external_port} ({nat_result.protocol.value})")
                 # 홀펀치 클라이언트 참조 저장
                 if nat_result.protocol == NATProtocol.HOLEPUNCH and self.nat_manager.holepunch_client:
                     self._holepunch_client = self.nat_manager.holepunch_client
@@ -150,13 +160,6 @@ class Node:
         initial_peers = self.discovery.initialize()
         for addr in initial_peers:
             self.peer_manager.add_peer_address(addr)
-
-        # 서버 시작
-        self._server = await asyncio.start_server(
-            self._handle_inbound,
-            self.config.host,
-            self.config.port
-        )
 
         # 연결 유지 태스크
         asyncio.create_task(self._maintain_connections())
