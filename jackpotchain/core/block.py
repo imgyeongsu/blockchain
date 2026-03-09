@@ -174,8 +174,11 @@ class Block:
 def create_genesis_block(miner_address: str = None) -> Block:
     """
     Genesis Block 생성
+    - Output 0: 블록 보상 50 JACK (채굴자)
+    - Output 1: 잭팟풀 초기 자금 1,000,000 JACK
     """
     from ..crypto.address import JACKPOT_POOL_ADDRESS
+    from ..constants import GENESIS_JACKPOT_POOL_FUNDING
 
     # Genesis Coinbase TX
     coinbase_input = TxInput(
@@ -185,16 +188,22 @@ def create_genesis_block(miner_address: str = None) -> Block:
         sequence=0xFFFFFFFF
     )
 
-    # 초기 보상은 채굴자에게만 (수수료 없으므로 분배 없음)
+    # Output 0: 채굴자 보상
     coinbase_output = TxOutput(
         jack_value=BLOCK_REWARD,
         script_pubkey=b''  # Genesis는 특수 처리
     )
 
+    # Output 1: 잭팟풀 초기 자금
+    jackpot_pool_output = TxOutput(
+        jack_value=GENESIS_JACKPOT_POOL_FUNDING,
+        script_pubkey=b'JACKPOT_POOL'  # 잭팟풀 특수 마커
+    )
+
     coinbase_tx = Transaction(
         version=1,
         inputs=[coinbase_input],
-        outputs=[coinbase_output],
+        outputs=[coinbase_output, jackpot_pool_output],
         locktime=0
     )
 

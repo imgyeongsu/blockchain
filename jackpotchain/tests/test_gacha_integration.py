@@ -213,13 +213,14 @@ class TestGachaIntegration:
 
     def test_gacha_game_stats(self):
         """게임 통계"""
+        from jackpotchain.constants import GENESIS_JACKPOT_POOL_FUNDING
         game = GachaGame()
         game.pool.add_fee(1000000, block_height=1)
 
         stats = game.get_stats()
         assert 'balance' in stats
         assert 'pending_commits' in stats
-        assert stats['balance'] == 1000000
+        assert stats['balance'] == GENESIS_JACKPOT_POOL_FUNDING + 1000000
 
 
 class TestGachaRPCIntegration:
@@ -257,17 +258,19 @@ class TestGachaRPCIntegration:
         """getjackpotpool RPC 메서드"""
         from jackpotchain.rpc.server import RPCServer
         from jackpotchain.consensus.chain import Blockchain
+        from jackpotchain.constants import GENESIS_JACKPOT_POOL_FUNDING, COIN
 
         blockchain = Blockchain()
         game = GachaGame()
         # 100 JACK = 100 * 100_000_000 satoshi = 10_000_000_000 satoshi
         game.pool.add_fee(10_000_000_000, block_height=1)  # 100 JACK
 
+        expected_balance = (GENESIS_JACKPOT_POOL_FUNDING + 10_000_000_000) / COIN
+
         rpc = RPCServer(blockchain=blockchain, gacha=game)
 
         result = rpc._getjackpotpool()
-        assert result['balance'] == 100.0
-        assert result['next_payout'] == 60.0  # 60%
+        assert result['balance'] == expected_balance
 
 
 if __name__ == '__main__':

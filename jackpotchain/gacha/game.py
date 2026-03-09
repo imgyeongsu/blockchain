@@ -81,7 +81,8 @@ class LottoGame:
         store: CommitStore = None,
         get_block_hash: Callable[[int], bytes] = None
     ):
-        self.pool = pool or JackpotPool()
+        from ..constants import GENESIS_JACKPOT_POOL_FUNDING
+        self.pool = pool or JackpotPool(initial_balance=GENESIS_JACKPOT_POOL_FUNDING)
         self.store = store or CommitStore()
         # 블록 해시 조회 함수 (체인에서 주입)
         self._get_block_hash = get_block_hash

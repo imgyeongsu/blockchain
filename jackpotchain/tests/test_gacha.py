@@ -352,12 +352,13 @@ class TestLottoGame:
 
     def test_game_stats(self):
         """게임 통계"""
+        from ..constants import GENESIS_JACKPOT_POOL_FUNDING
         game = LottoGame()
         game.pool.add_fee(1_000_000, block_height=1)
 
         stats = game.get_stats()
         assert 'balance' in stats
-        assert stats['balance'] == 1_000_000
+        assert stats['balance'] == GENESIS_JACKPOT_POOL_FUNDING + 1_000_000
 
 
 class TestLegacyCompatibility:

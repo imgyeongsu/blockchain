@@ -161,3 +161,4 @@ MAX_TX_SIZE = 100_000            # 단일 TX 최대 크기 (100 KB)
 # =============================================================================
 GENESIS_TIMESTAMP = 1735689600   # 2025-01-01 00:00:00 UTC
 GENESIS_MESSAGE = b"JackpotChain Genesis - 2025"
+GENESIS_JACKPOT_POOL_FUNDING = 1_000_000 * COIN  # 100만 JACK 잭팟풀 초기 자금
