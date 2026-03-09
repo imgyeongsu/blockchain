@@ -17,6 +17,7 @@ from .protocol import (
 )
 from .peer import PeerManager, PeerAddress, PeerState, PeerInfo
 from .discovery import PeerDiscovery
+from .nat import NATManager, NATProtocol
 from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
@@ -34,6 +35,9 @@ class NodeConfig:
     relay: bool = True
     data_dir: str = None  # 피어 캐시 저장 경로
     discovery_interval: int = 1800  # 피어 발견 주기 (30분)
+    # NAT 설정
+    nat_enabled: bool = True  # PCP/NAT-PMP 자동 포트 매핑
+    nat_lifetime: int = 7200  # 매핑 유효기간 (초)
 
 
 class Node:
@@ -56,6 +60,14 @@ class Node:
         # 피어 발견
         self.discovery = PeerDiscovery(self.config.data_dir)
 
+        # NAT 자동 포트 매핑
+        self.nat_manager: Optional[NATManager] = None
+        if self.config.nat_enabled:
+            self.nat_manager = NATManager(
+                internal_port=self.config.port,
+                lifetime=self.config.nat_lifetime
+            )
+
         # 연결 (PeerAddress -> (reader, writer))
         self._connections: Dict[PeerAddress, tuple] = {}
 
@@ -75,6 +87,13 @@ class Node:
     def height(self) -> int:
         return self.blockchain.get_height()
 
+    @property
+    def external_address(self) -> Optional[tuple]:
+        """외부에서 접근 가능한 주소 (ip, port)"""
+        if self.nat_manager and self.nat_manager.is_mapped:
+            return self.nat_manager.external_address
+        return None
+
     def set_block_callback(self, callback: Callable):
         """블록 수신 콜백 설정"""
         self._on_block = callback
@@ -86,6 +105,14 @@ class Node:
     async def start(self):
         """노드 시작"""
         self._running = True
+
+        # NAT 자동 포트 매핑 (PCP → NAT-PMP → 실패시 아웃바운드 전용)
+        if self.nat_manager:
+            nat_result = await self.nat_manager.setup_port_mapping()
+            if nat_result.success:
+                print(f"[NAT] 포트 매핑 성공: {nat_result.external_ip}:{nat_result.external_port} ({nat_result.protocol.value})")
+            else:
+                print(f"[NAT] 포트 매핑 실패 - 아웃바운드 전용 모드")
 
         # 피어 발견 초기화
         initial_peers = self.discovery.initialize()
@@ -108,6 +135,10 @@ class Node:
     async def stop(self):
         """노드 정지"""
         self._running = False
+
+        # NAT 매핑 제거
+        if self.nat_manager:
+            await self.nat_manager.remove_mapping()
 
         # 피어 캐시 저장
         self.discovery.save()

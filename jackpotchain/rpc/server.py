@@ -315,14 +315,21 @@ class RPCServer:
     # Wallet Methods
     # =========================================================================
 
-    def _getbalance(self) -> float:
-        """잔액 조회"""
+    def _getbalance(self, address: str = None) -> float:
+        """잔액 조회 (주소 지정 가능)"""
+        current_height = self.blockchain.get_height()
+
+        if address:
+            # 특정 주소의 잔액 조회
+            balance = self.blockchain.utxo_set.get_balance(address, current_height)
+            return balance / 100_000_000  # satoshi → JACK
+
         if not self.wallet:
             raise Exception("Wallet not available")
 
         balance = self.wallet.get_balance(
             self.blockchain.utxo_set,
-            self.blockchain.get_height()
+            current_height
         )
         return balance / 100_000_000  # satoshi → JACK
 
@@ -333,8 +340,22 @@ class RPCServer:
 
         return self.wallet.generate_address(label)
 
-    def _listunspent(self) -> list:
-        """UTXO 목록"""
+    def _listunspent(self, address: str = None) -> list:
+        """UTXO 목록 (주소 지정 가능)"""
+        if address:
+            # 특정 주소의 UTXO
+            utxos = self.blockchain.utxo_set.get_utxos_for_address(address)
+            return [
+                {
+                    'txid': utxo.outpoint.txid.hex(),
+                    'vout': utxo.outpoint.index,
+                    'address': address,
+                    'amount': utxo.output.jack_value / 100_000_000,
+                    'confirmations': self.blockchain.get_height() - utxo.block_height + 1
+                }
+                for utxo in utxos
+            ]
+
         if not self.wallet:
             raise Exception("Wallet not available")
 

@@ -53,6 +53,33 @@ docker-compose down -v    # 종료 + 데이터 삭제
 ### 3. 문서 작성
 - `tech.md` - 기술 스택 정리
 - `PROJECT_PROPOSAL.md` - 프로젝트 기획서
+- `NODE_FLOW.md` - 노드 실행 흐름도
+
+### 4. Claude 컨텍스트 폴더
+- `.CLAUDE/CLAUDE.md` - 프로젝트 컨텍스트 요약
+- `.CLAUDE/DECISIONS.md` - 아키텍처 결정 사항
+- `.CLAUDE/HISTORY.md` - 작업 히스토리
+
+### 5. NAT Traversal 구현 (인바운드 연결)
+Bitcoin Core v29.0 전략 적용
+
+**생성 파일:**
+- `jackpotchain/network/nat.py` - NATManager 클래스
+
+**수정 파일:**
+- `jackpotchain/network/node.py`
+  - NATManager 통합
+  - `start()`: 자동 포트 매핑 시도
+  - `stop()`: 매핑 제거
+  - `external_address` 속성 추가
+  - `NodeConfig`: nat_enabled, nat_lifetime 옵션
+
+**동작 순서:**
+```
+1. PCP (RFC 6887) 시도
+2. NAT-PMP (RFC 6886) 시도 (PCP 실패 시)
+3. 아웃바운드 전용 모드 (둘 다 실패 시)
+```
 
 ---
 

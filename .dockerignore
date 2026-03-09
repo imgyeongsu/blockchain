@@ -37,3 +37,5 @@ docs/
 .DS_Store
 Thumbs.db
 *.log
+
+.CLAUDE

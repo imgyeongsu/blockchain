@@ -109,6 +109,8 @@ def run_node(args):
     async def mining_task():
         """백그라운드 채굴 태스크"""
         from ..consensus.miner import create_block_template, mine_block
+        from ..consensus.difficulty import get_next_difficulty
+        from ..script.standard import get_address_from_script_pubkey
 
         print(f"Mining enabled. Reward address: {args.address}")
         mining_stats['is_mining'] = True
@@ -118,7 +120,11 @@ def run_node(args):
                 # 블록 템플릿 생성
                 txs = mempool.get_txs_for_block()
                 tip = blockchain.get_tip()
-                difficulty = tip.header.difficulty_target
+                # 난이도 조정 적용 (50블록마다)
+                difficulty = get_next_difficulty(
+                    blockchain.get_height(),
+                    blockchain.get_block_by_height
+                )
 
                 template = create_block_template(
                     prev_block=tip,
@@ -157,9 +163,13 @@ def run_node(args):
                     # 체인에 추가
                     success, msg = blockchain.add_block(result.block)
                     if success:
-                        # UTXO 업데이트
+                        # UTXO 업데이트 (주소 인덱싱 포함)
                         for tx in result.block.transactions:
-                            blockchain.utxo_set.apply_transaction(tx, blockchain.get_height())
+                            blockchain.utxo_set.apply_transaction(
+                                tx,
+                                blockchain.get_height(),
+                                get_address_from_script_pubkey
+                            )
 
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
@@ -253,7 +263,9 @@ def run_miner(args):
     """독립 채굴 실행 (레거시, node --mine 권장)"""
     from ..consensus.chain import Blockchain
     from ..consensus.miner import create_block_template, mine_block
+    from ..consensus.difficulty import get_next_difficulty
     from ..mempool.pool import Mempool
+    from ..script.standard import get_address_from_script_pubkey
 
     print(f"[WARNING] Standalone mining. Use 'node --mine' for integrated mining.")
     print(f"Starting miner. Reward address: {args.address}")
@@ -271,7 +283,11 @@ def run_miner(args):
         try:
             txs = mempool.get_txs_for_block()
             tip = blockchain.get_tip()
-            difficulty = tip.header.difficulty_target
+            # 난이도 조정 적용
+            difficulty = get_next_difficulty(
+                blockchain.get_height(),
+                blockchain.get_block_by_height
+            )
 
             template = create_block_template(
                 prev_block=tip,
@@ -296,7 +312,11 @@ def run_miner(args):
                 blockchain.add_block(result.block)
 
                 for tx in result.block.transactions:
-                    blockchain.utxo_set.apply_transaction(tx, blockchain.get_height())
+                    blockchain.utxo_set.apply_transaction(
+                        tx,
+                        blockchain.get_height(),
+                        get_address_from_script_pubkey
+                    )
 
                 print(f"  Total blocks mined: {block_count}")
 

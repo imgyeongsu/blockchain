@@ -49,8 +49,11 @@ python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./da
 │        ├─ PeerManager (피어 관리)                                           │
 │        │     └─ max_outbound: 6, max_inbound: 2                            │
 │        │                                                                    │
-│        └─ PeerDiscovery (피어 발견)                                         │
-│              └─ discovery.py                                                │
+│        ├─ PeerDiscovery (피어 발견)                                         │
+│        │     └─ discovery.py                                                │
+│        │                                                                    │
+│        └─ NATManager (자동 포트 매핑)                                       │
+│              └─ nat.py (PCP/NAT-PMP)                                        │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                     │
                                     ▼
@@ -69,19 +72,25 @@ python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./da
 │                                                                             │
 │     await node.start()                                                      │
 │        │                                                                    │
-│        ├─ (1) 피어 발견 초기화                                              │
+│        ├─ (1) NAT 포트 매핑 (인바운드 연결용)                               │
+│        │      └─ nat_manager.setup_port_mapping()                           │
+│        │          ├─ PCP 시도 (RFC 6887)                                    │
+│        │          ├─ NAT-PMP 시도 (RFC 6886)                                │
+│        │          └─ 실패 시 아웃바운드 전용                                │
+│        │                                                                    │
+│        ├─ (2) 피어 발견 초기화                                              │
 │        │      └─ discovery.initialize()                                     │
 │        │          ├─ peers.json 캐시 로드                                   │
 │        │          ├─ DNS 시드 조회                                          │
 │        │          └─ 하드코딩 시드 추가                                     │
 │        │                                                                    │
-│        ├─ (2) TCP 서버 시작 (포트 8333)                                     │
+│        ├─ (3) TCP 서버 시작 (포트 8333)                                     │
 │        │      └─ asyncio.start_server(_handle_inbound)                      │
 │        │                                                                    │
-│        ├─ (3) 연결 유지 태스크                                              │
+│        ├─ (4) 연결 유지 태스크                                              │
 │        │      └─ _maintain_connections()                                    │
 │        │                                                                    │
-│        └─ (4) 피어 발견 태스크                                              │
+│        └─ (5) 피어 발견 태스크                                              │
 │               └─ _discovery_loop()                                          │
 │                                                                             │
 │     await rpc.start()                                                       │
@@ -157,6 +166,7 @@ python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./da
 | `network/peer.py` | 피어 정보, PeerManager |
 | `network/protocol.py` | 메시지 타입 (VERSION, INV, BLOCK 등) |
 | `network/discovery.py` | 피어 발견 (DNS 시드, 캐시) |
+| `network/nat.py` | NAT 포트 매핑 (PCP/NAT-PMP) |
 
 ### 합의
 | 파일 | 역할 |
