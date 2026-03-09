@@ -125,9 +125,7 @@ async def run_single_node(node_id: str, data_dir: str = None):
 
         success, msg = blockchain.add_block(block)
         if success:
-            # UTXO 업데이트
-            for tx in block.transactions:
-                blockchain.utxo_set.apply_transaction(tx, blockchain.get_height())
+            # UTXO 자동 적용됨
             print(f"  Added! Height: {blockchain.get_height()}")
         else:
             print(f"  Rejected: {msg}")
@@ -169,9 +167,7 @@ async def run_single_node(node_id: str, data_dir: str = None):
 
                     success, msg = blockchain.add_block(result.block)
                     if success:
-                        for tx in result.block.transactions:
-                            blockchain.utxo_set.apply_transaction(tx, blockchain.get_height())
-
+                        # UTXO 자동 적용됨
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
                         print(f"  Broadcasted to {len(node.peer_manager.get_connected_peers())} peers")

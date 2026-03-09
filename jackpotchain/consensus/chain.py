@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..core.block import Block, create_genesis_block
-from ..core.utxo import UTXOSet
+from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
 
 
@@ -70,6 +70,10 @@ class Blockchain:
 
         # UTXO Set
         self.utxo_set = UTXOSet()
+
+        # Undo 데이터 (Reorg용): block_hash -> List[List[UTXO]]
+        # 각 블록의 각 TX가 소비한 UTXO들 저장
+        self._undo_data: Dict[bytes, List[List[UTXO]]] = {}
 
         # 상태
         self.state = ChainState.SYNCING
@@ -175,6 +179,9 @@ class Blockchain:
         self._tips[block_hash] = tip
         self._main_tip = tip
 
+        # Genesis 블록 UTXO 적용
+        self._connect_block(block, 0)
+
     def _calculate_work(self, difficulty_target: int) -> int:
         """난이도에서 작업량 계산"""
         target = compact_to_target(difficulty_target)
@@ -246,6 +253,8 @@ class Blockchain:
             else:
                 # 단순 확장
                 self._height_to_hash[new_height] = block_hash
+                # UTXO 적용 및 undo 데이터 저장
+                self._connect_block(block, new_height)
 
             # 영구 저장
             if self._store:
@@ -306,9 +315,59 @@ class Blockchain:
             height = self._block_index[block_hash].height
             self._height_to_hash[height] = block_hash
 
-        # TODO: UTXO Set 업데이트 (disconnect/connect)
+        # UTXO Set 업데이트 (disconnect/connect)
+        # 1. 기존 블록들 되돌리기 (역순으로)
+        for block_hash in blocks_to_disconnect:
+            self._disconnect_block(block_hash)
+
+        # 2. 새 블록들 연결하기
+        for block_hash in blocks_to_connect:
+            block = self._blocks[block_hash]
+            height = self._block_index[block_hash].height
+            self._connect_block(block, height)
 
         self.state = ChainState.SYNCED
+
+    def _connect_block(self, block: Block, height: int):
+        """
+        블록 연결 (UTXO 적용 + undo 데이터 저장)
+
+        Args:
+            block: 연결할 블록
+            height: 블록 높이
+        """
+        block_hash = block.get_hash()
+        undo_data: List[List[UTXO]] = []
+
+        for tx in block.transactions:
+            # UTXO 적용 및 소비된 UTXO 저장
+            spent_utxos = self.utxo_set.apply_transaction(tx, height)
+            undo_data.append(spent_utxos)
+
+        # Undo 데이터 저장 (나중에 disconnect용)
+        self._undo_data[block_hash] = undo_data
+
+    def _disconnect_block(self, block_hash: bytes):
+        """
+        블록 연결 해제 (UTXO 되돌리기)
+
+        Args:
+            block_hash: 연결 해제할 블록 해시
+        """
+        block = self._blocks.get(block_hash)
+        if not block:
+            return
+
+        undo_data = self._undo_data.get(block_hash, [])
+
+        # 트랜잭션을 역순으로 되돌리기
+        for i in range(len(block.transactions) - 1, -1, -1):
+            tx = block.transactions[i]
+            spent_utxos = undo_data[i] if i < len(undo_data) else []
+            self.utxo_set.revert_transaction(tx, spent_utxos)
+
+        # Undo 데이터 제거
+        self._undo_data.pop(block_hash, None)
 
     def _get_ancestors(self, block_hash: bytes, limit: int = 1000) -> List[bytes]:
         """블록의 조상들 반환"""

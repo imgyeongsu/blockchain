@@ -67,10 +67,10 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 - 가챠 Commit/Reveal 기본 플로우
 
 ### 4.2 부분 구현(기능 뼈대는 있으나 보강 필요)
-- Reorg 시 UTXO 재계산 (`consensus/chain.py` TODO)
+- ~~Reorg 시 UTXO 재계산~~ → 구현 완료 (`consensus/chain.py`)
 - Sync 헤더 검증/저장 (`sync/manager.py` TODO)
 - Network 일부 처리(`node.py` TODO 다수)
-- RPC 일부 값은 placeholder (`confirmations`, `networkhashps`)
+- ~~RPC placeholder~~ → 수정 완료 (`confirmations`, `networkhashps`)
 
 ### 4.3 코드상 즉시 수정 권장 이슈
 - `rpc/server.py`의 `gachacommit`, `gachareveal`이 `mempool.add_transaction()` 호출
@@ -118,9 +118,9 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 3. ~~`constants`, `gacha`, `rpc`, `tests` 동기화~~ → 완료
 
 ### P1 (기능 안정화)
-1. Reorg 시 UTXO disconnect/connect 구현
+1. ~~Reorg 시 UTXO disconnect/connect 구현~~ → 완료
 2. Sync 헤더 검증 및 저장 완료
-3. RPC confirmations/networkhashps 실제 계산 반영
+3. ~~RPC confirmations/networkhashps 실제 계산 반영~~ → 완료
 4. 로또 통합 테스트 실행 검증
 
 ### P2 (도메인 확장)

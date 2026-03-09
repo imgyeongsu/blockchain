@@ -5,7 +5,7 @@ Step 2.3: UTXO 관리
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import struct
 
 from .transaction import Transaction, TxOutput
@@ -118,19 +118,26 @@ class UTXOSet:
         tx: Transaction,
         block_height: int,
         get_address_from_script: callable = None
-    ):
+    ) -> List['UTXO']:
         """
         트랜잭션 적용 (UTXO 업데이트)
         - 입력의 UTXO 제거
         - 출력을 새 UTXO로 추가
+
+        Returns:
+            spent_utxos: 소비된 UTXO 목록 (Reorg 시 복원용)
         """
         tx_id = tx.get_txid()
         is_coinbase = tx.is_coinbase()
+        spent_utxos: List[UTXO] = []
 
         # 입력 처리 (Coinbase 제외)
         if not is_coinbase:
             for inp in tx.inputs:
-                self.remove_utxo(inp.prev_tx_id, inp.output_index)
+                # 제거 전에 UTXO 저장 (undo용)
+                spent = self.remove_utxo(inp.prev_tx_id, inp.output_index)
+                if spent:
+                    spent_utxos.append(spent)
 
         # 출력 처리
         for idx, out in enumerate(tx.outputs):
@@ -148,6 +155,8 @@ class UTXOSet:
                 address = get_address_from_script(out.script_pubkey)
 
             self.add_utxo(utxo, address)
+
+        return spent_utxos
 
     def revert_transaction(
         self,

@@ -160,17 +160,9 @@ def run_node(args):
                     print(f"  Total mined: {mining_stats['blocks_mined']}")
                     print(f"{'='*50}\n")
 
-                    # 체인에 추가
+                    # 체인에 추가 (UTXO 자동 적용됨)
                     success, msg = blockchain.add_block(result.block)
                     if success:
-                        # UTXO 업데이트 (주소 인덱싱 포함)
-                        for tx in result.block.transactions:
-                            blockchain.utxo_set.apply_transaction(
-                                tx,
-                                blockchain.get_height(),
-                                get_address_from_script_pubkey
-                            )
-
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
                         print(f"[Miner] Block added and broadcasted. New height: {blockchain.get_height()}")
@@ -309,14 +301,8 @@ def run_miner(args):
                 hashrate = result.hash_count / result.elapsed_time if result.elapsed_time > 0 else float('inf')
                 print(f"  Hashrate: {hashrate:.2f} H/s")
 
+                # UTXO 자동 적용됨
                 blockchain.add_block(result.block)
-
-                for tx in result.block.transactions:
-                    blockchain.utxo_set.apply_transaction(
-                        tx,
-                        blockchain.get_height(),
-                        get_address_from_script_pubkey
-                    )
 
                 print(f"  Total blocks mined: {block_count}")
 

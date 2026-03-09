@@ -185,17 +185,10 @@ class SyncManager:
         )
 
         if result.is_valid:
-            # 체인에 추가
+            # 체인에 추가 (UTXO 자동 적용됨)
             success, _ = self.blockchain.add_block(block)
             if success:
                 self._blocks_downloaded += 1
-
-                # UTXO 업데이트
-                for tx in block.transactions:
-                    self.blockchain.utxo_set.apply_transaction(
-                        tx,
-                        self.blockchain.get_height()
-                    )
         else:
             # 잘못된 블록 - 피어 밴 점수 추가
             self.peer_manager.add_ban_score(peer.address, 20)
