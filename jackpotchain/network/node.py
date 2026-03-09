@@ -347,7 +347,9 @@ class Node:
         version_msg = VersionMessage.deserialize(payload)
         self.peer_manager.update_peer_version(address, version_msg)
         self.peer_manager.update_peer_height(address, version_msg.start_height)
-        self.peer_manager.update_peer_state(address, PeerState.HANDSHAKING)
+        peer = self.peer_manager.get_peer(address)
+        if peer and peer.state != PeerState.READY:
+            self.peer_manager.update_peer_state(address, PeerState.HANDSHAKING)
 
         # VERACK 전송
         await self._send_message(address, MessageType.VERACK, b'')
