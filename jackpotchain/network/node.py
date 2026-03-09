@@ -19,11 +19,12 @@ from .protocol import (
 from .peer import PeerManager, PeerAddress, PeerState, PeerInfo
 from .discovery import PeerDiscovery
 from .nat import NATManager, NATProtocol
+from .holepunch import HolePunchClient, RendezvousServer, HolePunchResult
 from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
 from ..mempool.pool import Mempool
-from ..constants import DEFAULT_PORT
+from ..constants import DEFAULT_PORT, DEFAULT_RENDEZVOUS_PORT
 
 
 @dataclass
@@ -40,6 +41,11 @@ class NodeConfig:
     # NAT 설정
     nat_enabled: bool = True  # PCP/NAT-PMP 자동 포트 매핑
     nat_lifetime: int = 7200  # 매핑 유효기간 (초)
+    # Hole Punch 설정
+    holepunch_enabled: bool = True
+    rendezvous_port: int = DEFAULT_RENDEZVOUS_PORT  # 8334
+    rendezvous_seeds: list = None  # 랑데부 시드 노드 (ip:port)
+    is_seed_node: bool = False  # True면 랑데부 서버도 실행
 
 
 class Node:
@@ -55,6 +61,12 @@ class Node:
         self.config = config or NodeConfig()
         self.blockchain = blockchain or Blockchain()
         self.mempool = mempool  # TX 전파용 (없으면 TX 기능 비활성)
+
+        # 상태 (NAT 초기화보다 먼저)
+        self._running = False
+        self._server = None
+        self._nonce = int(time.time() * 1000) % (2**64)
+
         self.peer_manager = PeerManager(
             max_outbound=self.config.max_outbound,
             max_inbound=self.config.max_inbound
@@ -68,8 +80,15 @@ class Node:
         if self.config.nat_enabled:
             self.nat_manager = NATManager(
                 internal_port=self.config.port,
-                lifetime=self.config.nat_lifetime
+                lifetime=self.config.nat_lifetime,
+                holepunch_enabled=self.config.holepunch_enabled,
+                rendezvous_seeds=self.config.rendezvous_seeds or [],
+                node_id=self._nonce.to_bytes(8, 'big')
             )
+
+        # 홀펀치 / 랑데부
+        self._holepunch_client: Optional[HolePunchClient] = None
+        self._rendezvous_server: Optional[RendezvousServer] = None
 
         # 연결 (PeerAddress -> (reader, writer))
         self._connections: Dict[PeerAddress, tuple] = {}
@@ -78,11 +97,6 @@ class Node:
         self._on_block: Optional[Callable[[Block, PeerInfo], None]] = None
         self._on_tx: Optional[Callable[[Transaction, PeerInfo], None]] = None
         self._headers_callback: Optional[Callable] = None
-
-        # 상태
-        self._running = False
-        self._server = None
-        self._nonce = int(time.time() * 1000) % (2**64)
 
         # GETADDR 요청 시간 추적 (스팸 방지)
         self._last_getaddr: Dict[PeerAddress, float] = {}
@@ -114,11 +128,21 @@ class Node:
         """노드 시작"""
         self._running = True
 
-        # NAT 자동 포트 매핑 (PCP → NAT-PMP → 실패시 아웃바운드 전용)
+        # 시드 노드면 랑데부 서버 시작
+        if self.config.is_seed_node:
+            self._rendezvous_server = RendezvousServer(port=self.config.rendezvous_port)
+            await self._rendezvous_server.start(self.config.host)
+            print(f"[Rendezvous] 랑데부 서버 시작 - 포트 {self.config.rendezvous_port}")
+
+        # NAT 자동 포트 매핑 (PCP → NAT-PMP → UPnP → HolePunch → 실패)
         if self.nat_manager:
             nat_result = await self.nat_manager.setup_port_mapping()
             if nat_result.success:
                 print(f"[NAT] 포트 매핑 성공: {nat_result.external_ip}:{nat_result.external_port} ({nat_result.protocol.value})")
+                # 홀펀치 클라이언트 참조 저장
+                if nat_result.protocol == NATProtocol.HOLEPUNCH and self.nat_manager.holepunch_client:
+                    self._holepunch_client = self.nat_manager.holepunch_client
+                    self._holepunch_client._on_punch_success = self._on_holepunch_inbound
             else:
                 print(f"[NAT] 포트 매핑 실패 - 아웃바운드 전용 모드")
 
@@ -144,7 +168,11 @@ class Node:
         """노드 정지"""
         self._running = False
 
-        # NAT 매핑 제거
+        # 랑데부 서버 중지
+        if self._rendezvous_server:
+            await self._rendezvous_server.stop()
+
+        # NAT 매핑 제거 (홀펀치 클라이언트도 여기서 정리)
         if self.nat_manager:
             await self.nat_manager.remove_mapping()
 
@@ -184,8 +212,48 @@ class Node:
             return True
 
         except Exception as e:
+            # 직접 연결 실패 - 홀펀칭 시도
+            if self._holepunch_client and self._holepunch_client.is_registered:
+                hp_result = await self._holepunch_client.request_punch(
+                    address.ip, address.port
+                )
+                if hp_result.success:
+                    peer = self.peer_manager.add_peer(address, is_inbound=False)
+                    if peer:
+                        self._connections[address] = (hp_result.reader, hp_result.writer)
+                        asyncio.create_task(
+                            self._handle_peer(address, hp_result.reader, hp_result.writer)
+                        )
+                        await self._send_version(address)
+                        print(f"[HolePunch] 피어 연결 성공: {address.ip}:{address.port}")
+                        return True
+
             self.peer_manager.update_peer_state(address, PeerState.DISCONNECTED)
             return False
+
+    async def _on_holepunch_inbound(self, result: HolePunchResult):
+        """홀펀칭으로 인바운드 연결 수신"""
+        if not result.success:
+            return
+
+        address = PeerAddress(ip=result.peer_ip, port=result.peer_port)
+
+        if not self.peer_manager.can_accept_inbound():
+            if result.writer:
+                result.writer.close()
+            return
+
+        peer = self.peer_manager.add_peer(address, is_inbound=True)
+        if peer is None:
+            if result.writer:
+                result.writer.close()
+            return
+
+        self._connections[address] = (result.reader, result.writer)
+        asyncio.create_task(
+            self._handle_peer(address, result.reader, result.writer)
+        )
+        print(f"[HolePunch] 인바운드 연결 수신: {result.peer_ip}:{result.peer_port}")
 
     async def _handle_inbound(self, reader, writer):
         """인바운드 연결 처리"""

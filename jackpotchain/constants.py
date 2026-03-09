@@ -141,6 +141,16 @@ MAX_INV_SIZE = 50000             # INV 메시지 최대 항목
 MAX_HEADERS_SIZE = 2000          # HEADERS 응답 최대 개수
 
 # =============================================================================
+# Hole Punch / Rendezvous
+# =============================================================================
+DEFAULT_RENDEZVOUS_PORT = DEFAULT_PORT + 1  # 8334
+HOLEPUNCH_TIMEOUT = 10           # 홀펀칭 전체 타임아웃 (초)
+HOLEPUNCH_RETRY_COUNT = 10       # 동시 TCP open 재시도 횟수
+HOLEPUNCH_RETRY_DELAY = 0.5      # 재시도 간격 (초)
+RENDEZVOUS_HEARTBEAT_INTERVAL = 30   # 하트비트 간격 (초)
+RENDEZVOUS_STALE_TIMEOUT = 120       # 등록 만료 (초)
+
+# =============================================================================
 # Mempool 제한
 # =============================================================================
 MAX_MEMPOOL_SIZE = 300 * 1024 * 1024  # 300 MB

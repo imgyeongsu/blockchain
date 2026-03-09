@@ -27,6 +27,7 @@ class NATProtocol(Enum):
     PCP = "pcp"
     NAT_PMP = "nat-pmp"
     UPNP = "upnp"
+    HOLEPUNCH = "holepunch"  # TCP 홀펀칭
     MANUAL = "manual"  # 수동 포트포워딩
 
 
@@ -74,7 +75,10 @@ class NATManager:
         self,
         internal_port: int = 8333,
         lifetime: int = DEFAULT_LIFETIME,
-        gateway: Optional[str] = None
+        gateway: Optional[str] = None,
+        holepunch_enabled: bool = True,
+        rendezvous_seeds: Optional[list] = None,
+        node_id: Optional[bytes] = None
     ):
         self.internal_port = internal_port
         self.lifetime = lifetime
@@ -85,6 +89,11 @@ class NATManager:
         # UPnP 상태
         self._upnp_control_url: Optional[str] = None
         self._upnp_service_type: Optional[str] = None
+        # Hole Punch 상태
+        self._holepunch_enabled = holepunch_enabled
+        self._rendezvous_seeds = rendezvous_seeds or []
+        self._node_id = node_id
+        self.holepunch_client = None  # HolePunchClient 인스턴스
 
     @property
     def is_mapped(self) -> bool:
@@ -158,12 +167,21 @@ class NATManager:
             self._start_refresh_task()
             return result
 
+        # 4순위: TCP Hole Punch (랑데부 서버 등록)
+        if self._holepunch_enabled and self._rendezvous_seeds:
+            result = await self._try_holepunch()
+            if result.success:
+                logger.info(f"TCP Hole Punch 등록 성공: {result.external_ip}:{result.external_port}")
+                self._active_protocol = NATProtocol.HOLEPUNCH
+                self._mapping_result = result
+                return result
+
         # 실패
         logger.warning("NAT 포트 매핑 실패 - 아웃바운드 전용 모드로 동작")
         return MappingResult(
             success=False,
             protocol=NATProtocol.NONE,
-            error="PCP/NAT-PMP/UPnP 모두 실패"
+            error="PCP/NAT-PMP/UPnP/HolePunch 모두 실패"
         )
 
     async def _try_pcp(self, gateway: str) -> MappingResult:
@@ -727,6 +745,50 @@ class NATManager:
         except:
             return False
 
+    async def _try_holepunch(self) -> MappingResult:
+        """TCP Hole Punch - 랑데부 서버에 등록"""
+        from .holepunch import HolePunchClient
+        from ..constants import DEFAULT_RENDEZVOUS_PORT
+
+        if not self._node_id:
+            import os
+            self._node_id = os.urandom(8)
+
+        client = HolePunchClient(
+            local_port=self.internal_port,
+            node_id=self._node_id
+        )
+
+        # 시드 노드들에 순서대로 등록 시도
+        for seed in self._rendezvous_seeds:
+            if ':' in seed:
+                host, port = seed.rsplit(':', 1)
+                port = int(port)
+            else:
+                host = seed
+                port = DEFAULT_RENDEZVOUS_PORT
+
+            try:
+                success = await client.register(host, port)
+                if success:
+                    self.holepunch_client = client
+                    return MappingResult(
+                        success=True,
+                        protocol=NATProtocol.HOLEPUNCH,
+                        external_ip=client.external_ip,
+                        external_port=client.external_port,
+                        internal_port=self.internal_port,
+                        lifetime=0  # 홀펀칭은 lifetime 없음
+                    )
+            except Exception as e:
+                logger.debug(f"랑데부 서버 {host}:{port} 연결 실패: {e}")
+
+        return MappingResult(
+            success=False,
+            protocol=NATProtocol.HOLEPUNCH,
+            error="랑데부 서버 연결 실패"
+        )
+
     def _start_refresh_task(self):
         """매핑 갱신 태스크 시작"""
         if self._refresh_task:
@@ -808,6 +870,12 @@ class NATManager:
                     )
                 self._upnp_control_url = None
                 self._upnp_service_type = None
+
+            elif self._active_protocol == NATProtocol.HOLEPUNCH:
+                # 홀펀치 클라이언트 중지
+                if self.holepunch_client:
+                    await self.holepunch_client.stop()
+                    self.holepunch_client = None
 
             logger.info("NAT 매핑 제거 완료")
         except Exception as e:

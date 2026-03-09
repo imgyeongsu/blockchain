@@ -19,6 +19,9 @@ from .discovery import (
     PeerDiscovery, PeerCache, CachedPeer,
     DNS_SEEDS, HARDCODED_SEEDS,
 )
+from .holepunch import (
+    HolePunchClient, RendezvousServer, HolePunchResult,
+)
 
 __all__ = [
     # Protocol
@@ -33,4 +36,6 @@ __all__ = [
     # Discovery
     'PeerDiscovery', 'PeerCache', 'CachedPeer',
     'DNS_SEEDS', 'HARDCODED_SEEDS',
+    # Hole Punch
+    'HolePunchClient', 'RendezvousServer', 'HolePunchResult',
 ]

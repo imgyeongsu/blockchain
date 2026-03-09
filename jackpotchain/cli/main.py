@@ -29,6 +29,10 @@ def main():
     # 채굴 통합 옵션
     node_parser.add_argument('--mine', action='store_true', help='Enable mining')
     node_parser.add_argument('--address', help='Mining reward address (required if --mine)')
+    # 홀펀치 / 랑데부 옵션
+    node_parser.add_argument('--seed-node', action='store_true', help='Run as seed node (enables rendezvous server)')
+    node_parser.add_argument('--rendezvous-port', type=int, default=8334, help='Rendezvous server port (default: 8334)')
+    node_parser.add_argument('--rendezvous-seed', action='append', help='Rendezvous seed (ip:port) for hole punching')
 
     # wallet 명령
     wallet_parser = subparsers.add_parser('wallet', help='Wallet operations')
@@ -76,7 +80,10 @@ def run_node(args):
     wallet = Wallet()
 
     config = NodeConfig(
-        port=args.port
+        port=args.port,
+        is_seed_node=args.seed_node,
+        rendezvous_port=args.rendezvous_port,
+        rendezvous_seeds=args.rendezvous_seed or [],
     )
     node = Node(config, blockchain, mempool)
 
