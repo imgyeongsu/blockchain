@@ -78,7 +78,7 @@ def run_node(args):
     config = NodeConfig(
         port=args.port
     )
-    node = Node(config, blockchain)
+    node = Node(config, blockchain, mempool)
 
     # 시드 노드 추가
     if args.seed:

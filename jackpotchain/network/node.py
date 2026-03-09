@@ -21,6 +21,7 @@ from .nat import NATManager, NATProtocol
 from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
+from ..mempool.pool import Mempool
 from ..constants import DEFAULT_PORT
 
 
@@ -49,9 +50,10 @@ class Node:
     - 블록/TX 전파
     """
 
-    def __init__(self, config: NodeConfig = None, blockchain: Blockchain = None):
+    def __init__(self, config: NodeConfig = None, blockchain: Blockchain = None, mempool: Mempool = None):
         self.config = config or NodeConfig()
         self.blockchain = blockchain or Blockchain()
+        self.mempool = mempool  # TX 전파용 (없으면 TX 기능 비활성)
         self.peer_manager = PeerManager(
             max_outbound=self.config.max_outbound,
             max_inbound=self.config.max_inbound
@@ -309,8 +311,9 @@ class Node:
                 if not self.blockchain.has_block(item.hash):
                     to_fetch.append(item)
             elif item.inv_type == InvType.TX:
-                # TODO: Mempool 확인
-                to_fetch.append(item)
+                # Mempool에 없는 TX만 요청
+                if self.mempool and not self.mempool.has_tx(item.hash):
+                    to_fetch.append(item)
 
         if to_fetch:
             getdata = GetDataMessage(items=to_fetch)
@@ -326,8 +329,11 @@ class Node:
                 if block:
                     await self._send_message(address, MessageType.BLOCK, block.serialize())
             elif item.inv_type == InvType.TX:
-                # TODO: Mempool에서 조회
-                pass
+                # Mempool에서 TX 조회 후 전송
+                if self.mempool:
+                    tx = self.mempool.get_tx(item.hash)
+                    if tx:
+                        await self._send_message(address, MessageType.TX, tx.serialize())
 
     async def _handle_block(self, address: PeerAddress, payload: bytes):
         """BLOCK 수신"""

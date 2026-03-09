@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from aiohttp import web
 
 from ..consensus.chain import Blockchain
+from ..consensus.difficulty import difficulty_to_hashrate
 from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
@@ -360,12 +361,13 @@ class RPCServer:
             raise Exception("Wallet not available")
 
         utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
+        current_height = self.blockchain.get_height()
         return [
             {
                 'txid': utxo.tx_id.hex(),
                 'vout': utxo.output_index,
                 'amount': utxo.output.jack_value / 100_000_000,
-                'confirmations': 0,  # TODO
+                'confirmations': max(0, current_height - utxo.block_height + 1),
             }
             for utxo in utxos
         ]
@@ -444,10 +446,11 @@ class RPCServer:
 
     def _getmininginfo(self) -> dict:
         """채굴 정보"""
+        difficulty = self.blockchain.get_difficulty()
         return {
             'blocks': self.blockchain.get_height(),
-            'difficulty': self.blockchain.get_difficulty(),
-            'networkhashps': 0,  # TODO
+            'difficulty': difficulty,
+            'networkhashps': difficulty_to_hashrate(difficulty),
             'pooledtx': self.mempool.get_stats()['count'],
         }
 
