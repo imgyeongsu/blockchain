@@ -12,7 +12,8 @@ from dataclasses import dataclass
 from .protocol import (
     MessageType, MessageHeader,
     VersionMessage, InvMessage, InvItem, InvType,
-    GetDataMessage, GetBlocksMessage, AddrMessage, NetAddress,
+    GetDataMessage, GetBlocksMessage, GetHeadersMessage, HeadersMessage,
+    AddrMessage, NetAddress,
     create_message, parse_message,
 )
 from .peer import PeerManager, PeerAddress, PeerState, PeerInfo
@@ -76,6 +77,7 @@ class Node:
         # 콜백
         self._on_block: Optional[Callable[[Block, PeerInfo], None]] = None
         self._on_tx: Optional[Callable[[Transaction, PeerInfo], None]] = None
+        self._headers_callback: Optional[Callable] = None
 
         # 상태
         self._running = False
@@ -103,6 +105,10 @@ class Node:
     def set_tx_callback(self, callback: Callable):
         """TX 수신 콜백 설정"""
         self._on_tx = callback
+
+    def set_headers_callback(self, callback: Callable):
+        """헤더 수신 콜백 설정"""
+        self._headers_callback = callback
 
     async def start(self):
         """노드 시작"""
@@ -261,6 +267,8 @@ class Node:
             await self._handle_getblocks(address, payload)
         elif cmd == b'getheaders':
             await self._handle_getheaders(address, payload)
+        elif cmd == b'headers':
+            await self._handle_headers(address, payload)
         elif cmd == b'getaddr':
             await self._handle_getaddr(address)
         elif cmd == b'addr':
@@ -373,9 +381,62 @@ class Node:
             await self._send_message(address, MessageType.INV, inv.serialize())
 
     async def _handle_getheaders(self, address: PeerAddress, payload: bytes):
-        """GETHEADERS 처리"""
-        # TODO: HEADERS 응답
-        pass
+        """GETHEADERS 처리 - 블록 헤더 목록 반환"""
+        if not self.blockchain:
+            return
+
+        try:
+            msg = GetHeadersMessage.deserialize(payload)
+        except Exception:
+            return
+
+        # 1. block_locator에서 공통 블록 찾기
+        start_height = 0
+        for block_hash in msg.block_locator:
+            index = self.blockchain.get_block_index(block_hash)
+            if index and index.is_in_main_chain:
+                start_height = index.height + 1
+                break
+
+        # 2. 헤더 수집 (최대 2000개)
+        headers = []
+        current_height = self.blockchain.get_height()
+        hash_stop = msg.hash_stop
+
+        for height in range(start_height, min(start_height + 2000, current_height + 1)):
+            block = self.blockchain.get_block_by_height(height)
+            if not block:
+                break
+
+            headers.append(block.header.serialize())
+
+            # hash_stop 도달 시 중단
+            if hash_stop != bytes(32) and block.get_hash() == hash_stop:
+                break
+
+        # 3. HEADERS 응답
+        if headers:
+            headers_msg = HeadersMessage(headers=headers)
+            await self._send_message(address, MessageType.HEADERS, headers_msg.serialize())
+
+    async def _handle_headers(self, address: PeerAddress, payload: bytes):
+        """HEADERS 처리 - 블록 헤더 수신 (동기화용)"""
+        try:
+            msg = HeadersMessage.deserialize(payload)
+        except Exception:
+            return
+
+        if not msg.headers:
+            return
+
+        # 피어의 synced_headers 업데이트
+        peer = self.peer_manager.get_peer(address)
+        if peer:
+            peer.synced_headers += len(msg.headers)
+
+        # 콜백이 있으면 호출 (SyncManager에서 처리)
+        if self._headers_callback:
+            await self._headers_callback(address, msg.headers)
 
     async def _handle_getaddr(self, address: PeerAddress):
         """GETADDR 처리 - 알고 있는 피어 주소 전송"""

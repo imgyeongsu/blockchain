@@ -310,6 +310,66 @@ class AddrMessage:
         return cls(addresses)
 
 
+@dataclass
+class GetHeadersMessage:
+    """GETHEADERS 메시지 - 블록 헤더 요청"""
+    version: int = 70015
+    block_locator: List[bytes] = field(default_factory=list)
+    hash_stop: bytes = bytes(32)
+
+    def serialize(self) -> bytes:
+        from ..core.transaction import encode_varint
+        result = struct.pack('<I', self.version)
+        result += encode_varint(len(self.block_locator))
+        for hash_bytes in self.block_locator:
+            result += hash_bytes
+        result += self.hash_stop
+        return result
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> 'GetHeadersMessage':
+        from ..core.transaction import decode_varint
+        offset = 0
+        version = struct.unpack('<I', data[offset:offset+4])[0]
+        offset += 4
+        count, offset = decode_varint(data, offset)
+        block_locator = []
+        for _ in range(count):
+            block_locator.append(data[offset:offset+32])
+            offset += 32
+        hash_stop = data[offset:offset+32]
+        return cls(version, block_locator, hash_stop)
+
+
+@dataclass
+class HeadersMessage:
+    """HEADERS 메시지 - 블록 헤더 목록"""
+    headers: List[bytes] = field(default_factory=list)  # 80-byte headers
+
+    def serialize(self) -> bytes:
+        from ..core.transaction import encode_varint
+        result = encode_varint(len(self.headers))
+        for header in self.headers:
+            result += header
+            result += b'\x00'  # tx_count = 0 (varint)
+        return result
+
+    @classmethod
+    def deserialize(cls, data: bytes) -> 'HeadersMessage':
+        from ..core.transaction import decode_varint
+        count, offset = decode_varint(data, 0)
+        # 최대 2000개 제한
+        count = min(count, 2000)
+        headers = []
+        for _ in range(count):
+            header = data[offset:offset+80]
+            offset += 80
+            # tx_count 건너뛰기 (항상 0)
+            _, offset = decode_varint(data, offset)
+            headers.append(header)
+        return cls(headers)
+
+
 def create_message(msg_type: MessageType, payload: bytes) -> bytes:
     """완전한 메시지 생성"""
     checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
