@@ -1,10 +1,11 @@
 """
-NAT Traversal - PCP/NAT-PMP 자동 포트 매핑
+NAT Traversal - PCP/NAT-PMP/UPnP 자동 포트 매핑
 
-Bitcoin Core v29.0 전략:
+순서:
   1순위: PCP (Port Control Protocol, RFC 6887)
-  2순위: NAT-PMP (RFC 6886) - PCP 실패 시
-  3순위: 아웃바운드 전용 모드
+  2순위: NAT-PMP (RFC 6886)
+  3순위: UPnP (Universal Plug and Play)
+  4순위: 아웃바운드 전용 모드
 
 참고: 홈서버/시드노드는 공유기에서 수동 포트포워딩 권장
 """
@@ -25,6 +26,7 @@ class NATProtocol(Enum):
     NONE = "none"
     PCP = "pcp"
     NAT_PMP = "nat-pmp"
+    UPNP = "upnp"
     MANUAL = "manual"  # 수동 포트포워딩
 
 
@@ -80,6 +82,9 @@ class NATManager:
         self._active_protocol: NATProtocol = NATProtocol.NONE
         self._mapping_result: Optional[MappingResult] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        # UPnP 상태
+        self._upnp_control_url: Optional[str] = None
+        self._upnp_service_type: Optional[str] = None
 
     @property
     def is_mapped(self) -> bool:
@@ -144,12 +149,21 @@ class NATManager:
             self._start_refresh_task()
             return result
 
+        # 3순위: UPnP
+        result = await self._try_upnp()
+        if result.success:
+            logger.info(f"UPnP 매핑 성공: {result.external_ip}:{result.external_port}")
+            self._active_protocol = NATProtocol.UPNP
+            self._mapping_result = result
+            self._start_refresh_task()
+            return result
+
         # 실패
         logger.warning("NAT 포트 매핑 실패 - 아웃바운드 전용 모드로 동작")
         return MappingResult(
             success=False,
             protocol=NATProtocol.NONE,
-            error="PCP/NAT-PMP 모두 실패"
+            error="PCP/NAT-PMP/UPnP 모두 실패"
         )
 
     async def _try_pcp(self, gateway: str) -> MappingResult:
@@ -410,6 +424,309 @@ class NATManager:
             lifetime=lifetime
         )
 
+    async def _try_upnp(self) -> MappingResult:
+        """UPnP IGD 포트 매핑 시도"""
+        try:
+            # 1. SSDP로 IGD 찾기
+            control_url, service_type = await self._upnp_discover()
+            if not control_url:
+                return MappingResult(
+                    success=False,
+                    protocol=NATProtocol.UPNP,
+                    error="UPnP IGD를 찾을 수 없음"
+                )
+
+            # 2. 외부 IP 조회
+            external_ip = await self._upnp_get_external_ip(control_url, service_type)
+
+            # 3. 포트 매핑 추가
+            success = await self._upnp_add_port_mapping(
+                control_url,
+                service_type,
+                external_ip
+            )
+
+            if success:
+                # UPnP 상태 저장 (나중에 삭제용)
+                self._upnp_control_url = control_url
+                self._upnp_service_type = service_type
+
+                return MappingResult(
+                    success=True,
+                    protocol=NATProtocol.UPNP,
+                    external_ip=external_ip,
+                    external_port=self.internal_port,
+                    internal_port=self.internal_port,
+                    lifetime=self.lifetime
+                )
+            else:
+                return MappingResult(
+                    success=False,
+                    protocol=NATProtocol.UPNP,
+                    error="UPnP 포트 매핑 실패"
+                )
+
+        except Exception as e:
+            return MappingResult(
+                success=False,
+                protocol=NATProtocol.UPNP,
+                error=f"UPnP 오류: {e}"
+            )
+
+    async def _upnp_discover(self) -> Tuple[Optional[str], Optional[str]]:
+        """SSDP로 UPnP IGD 찾기"""
+        SSDP_ADDR = "239.255.255.250"
+        SSDP_PORT = 1900
+
+        # IGD 서비스 타입 (우선순위 순)
+        service_types = [
+            "urn:schemas-upnp-org:service:WANIPConnection:2",
+            "urn:schemas-upnp-org:service:WANIPConnection:1",
+            "urn:schemas-upnp-org:service:WANPPPConnection:1",
+        ]
+
+        for service_type in service_types:
+            search_target = service_type.replace(":service:", ":device:").replace("Connection", "Device").rsplit(":", 1)[0] + ":1"
+            if "WANIPConnection" in service_type:
+                search_target = "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
+
+            ssdp_request = (
+                f"M-SEARCH * HTTP/1.1\r\n"
+                f"HOST: {SSDP_ADDR}:{SSDP_PORT}\r\n"
+                f"MAN: \"ssdp:discover\"\r\n"
+                f"MX: 2\r\n"
+                f"ST: {search_target}\r\n"
+                f"\r\n"
+            )
+
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                sock.settimeout(3.0)
+                sock.setblocking(False)
+
+                loop = asyncio.get_event_loop()
+                await loop.sock_sendto(sock, ssdp_request.encode(), (SSDP_ADDR, SSDP_PORT))
+
+                try:
+                    response, _ = await asyncio.wait_for(
+                        loop.sock_recvfrom(sock, 4096),
+                        timeout=3.0
+                    )
+                    response = response.decode('utf-8', errors='ignore')
+
+                    # Location 헤더에서 XML URL 추출
+                    location = None
+                    for line in response.split('\r\n'):
+                        if line.lower().startswith('location:'):
+                            location = line.split(':', 1)[1].strip()
+                            break
+
+                    if location:
+                        # XML에서 Control URL 추출
+                        control_url = await self._upnp_get_control_url(location, service_type)
+                        if control_url:
+                            sock.close()
+                            return control_url, service_type
+
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    sock.close()
+
+            except Exception as e:
+                logger.debug(f"SSDP 탐색 오류: {e}")
+
+        return None, None
+
+    async def _upnp_get_control_url(self, location: str, service_type: str) -> Optional[str]:
+        """IGD XML에서 Control URL 추출"""
+        import re
+        from urllib.parse import urljoin
+
+        try:
+            # HTTP GET으로 XML 가져오기
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5.0)
+            sock.setblocking(False)
+
+            # URL 파싱
+            if location.startswith('http://'):
+                location = location[7:]
+            host_port, path = location.split('/', 1) if '/' in location else (location, '')
+            path = '/' + path
+            host, port = host_port.split(':') if ':' in host_port else (host_port, '80')
+            port = int(port)
+
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.sock_connect(sock, (host, port)),
+                timeout=5.0
+            )
+
+            request = f"GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+            await loop.sock_sendall(sock, request.encode())
+
+            response = b""
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        loop.sock_recv(sock, 4096),
+                        timeout=5.0
+                    )
+                    if not chunk:
+                        break
+                    response += chunk
+                except asyncio.TimeoutError:
+                    break
+
+            sock.close()
+            response = response.decode('utf-8', errors='ignore')
+
+            # XML에서 서비스 찾기
+            service_pattern = rf'<serviceType>{re.escape(service_type)}</serviceType>.*?<controlURL>([^<]+)</controlURL>'
+            match = re.search(service_pattern, response, re.DOTALL | re.IGNORECASE)
+
+            if match:
+                control_path = match.group(1)
+                base_url = f"http://{host}:{port}"
+                return urljoin(base_url, control_path)
+
+        except Exception as e:
+            logger.debug(f"Control URL 추출 오류: {e}")
+
+        return None
+
+    async def _upnp_get_external_ip(self, control_url: str, service_type: str) -> Optional[str]:
+        """UPnP로 외부 IP 조회"""
+        soap_action = f"{service_type}#GetExternalIPAddress"
+        soap_body = f"""<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:GetExternalIPAddress xmlns:u="{service_type}"></u:GetExternalIPAddress>
+</s:Body>
+</s:Envelope>"""
+
+        try:
+            response = await self._upnp_soap_request(control_url, soap_action, soap_body)
+            import re
+            match = re.search(r'<NewExternalIPAddress>([^<]+)</NewExternalIPAddress>', response)
+            if match:
+                return match.group(1)
+        except Exception as e:
+            logger.debug(f"외부 IP 조회 오류: {e}")
+
+        return None
+
+    async def _upnp_add_port_mapping(
+        self,
+        control_url: str,
+        service_type: str,
+        external_ip: Optional[str]
+    ) -> bool:
+        """UPnP 포트 매핑 추가"""
+        # 내부 IP 가져오기
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                internal_ip = s.getsockname()[0]
+        except:
+            internal_ip = "0.0.0.0"
+
+        soap_action = f"{service_type}#AddPortMapping"
+        soap_body = f"""<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:AddPortMapping xmlns:u="{service_type}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>{self.internal_port}</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+<NewInternalPort>{self.internal_port}</NewInternalPort>
+<NewInternalClient>{internal_ip}</NewInternalClient>
+<NewEnabled>1</NewEnabled>
+<NewPortMappingDescription>JackpotChain</NewPortMappingDescription>
+<NewLeaseDuration>{self.lifetime}</NewLeaseDuration>
+</u:AddPortMapping>
+</s:Body>
+</s:Envelope>"""
+
+        try:
+            response = await self._upnp_soap_request(control_url, soap_action, soap_body)
+            # 성공 시 200 OK 또는 AddPortMappingResponse 포함
+            return "AddPortMappingResponse" in response or "200" in response
+        except Exception as e:
+            logger.debug(f"포트 매핑 추가 오류: {e}")
+            return False
+
+    async def _upnp_soap_request(self, control_url: str, soap_action: str, soap_body: str) -> str:
+        """SOAP 요청 전송"""
+        from urllib.parse import urlparse
+
+        parsed = urlparse(control_url)
+        host = parsed.hostname
+        port = parsed.port or 80
+        path = parsed.path
+
+        headers = (
+            f"POST {path} HTTP/1.1\r\n"
+            f"Host: {host}:{port}\r\n"
+            f"Content-Type: text/xml; charset=\"utf-8\"\r\n"
+            f"Content-Length: {len(soap_body)}\r\n"
+            f"SOAPAction: \"{soap_action}\"\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        )
+
+        request = headers + soap_body
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.setblocking(False)
+
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.sock_connect(sock, (host, port)),
+            timeout=5.0
+        )
+
+        await loop.sock_sendall(sock, request.encode())
+
+        response = b""
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    loop.sock_recv(sock, 4096),
+                    timeout=5.0
+                )
+                if not chunk:
+                    break
+                response += chunk
+            except asyncio.TimeoutError:
+                break
+
+        sock.close()
+        return response.decode('utf-8', errors='ignore')
+
+    async def _upnp_delete_port_mapping(self, control_url: str, service_type: str) -> bool:
+        """UPnP 포트 매핑 삭제"""
+        soap_action = f"{service_type}#DeletePortMapping"
+        soap_body = f"""<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:DeletePortMapping xmlns:u="{service_type}">
+<NewRemoteHost></NewRemoteHost>
+<NewExternalPort>{self.internal_port}</NewExternalPort>
+<NewProtocol>TCP</NewProtocol>
+</u:DeletePortMapping>
+</s:Body>
+</s:Envelope>"""
+
+        try:
+            await self._upnp_soap_request(control_url, soap_action, soap_body)
+            return True
+        except:
+            return False
+
     def _start_refresh_task(self):
         """매핑 갱신 태스크 시작"""
         if self._refresh_task:
@@ -436,6 +753,8 @@ class NATManager:
                 result = await self._try_pcp(gateway)
             elif self._active_protocol == NATProtocol.NAT_PMP:
                 result = await self._try_nat_pmp(gateway)
+            elif self._active_protocol == NATProtocol.UPNP:
+                result = await self._try_upnp()
             else:
                 break
 
@@ -479,6 +798,16 @@ class NATManager:
                 request = self._build_pcp_map_request()
                 sock.sendto(request, (gateway, self.PCP_PORT))
                 sock.close()
+
+            elif self._active_protocol == NATProtocol.UPNP:
+                # UPnP 매핑 삭제
+                if self._upnp_control_url and self._upnp_service_type:
+                    await self._upnp_delete_port_mapping(
+                        self._upnp_control_url,
+                        self._upnp_service_type
+                    )
+                self._upnp_control_url = None
+                self._upnp_service_type = None
 
             logger.info("NAT 매핑 제거 완료")
         except Exception as e:
