@@ -71,11 +71,11 @@ LOTTO_DIGIT_COUNT = 6            # 6자리
 LOTTO_DIGIT_BASE = 16            # hex 0x0 ~ 0xf
 
 # 비교 블록
-LOTTO_BLOCK_INTERVAL = 5         # 비교 블록 간격
-LOTTO_COMPARISON_OFFSETS = [5, 10, 15, 20, 25, 30]  # N+5, N+10, ..., N+30
+LOTTO_BLOCK_INTERVAL = 3         # 비교 블록 간격
+LOTTO_COMPARISON_OFFSETS = [3, 6, 9, 12, 15, 18]  # N+3, N+6, ..., N+18
 
 # Claim 윈도우
-LOTTO_MIN_CLAIM_GAP = 30         # N+30 이후 Claim 가능
+LOTTO_MIN_CLAIM_GAP = 18         # N+18 이후 Claim 가능
 LOTTO_MAX_CLAIM_GAP = 80         # N+80까지 Claim 가능 (50블록 여유)
 GACHA_MIN_REVEAL_GAP = LOTTO_MIN_CLAIM_GAP  # 하위 호환
 GACHA_MAX_REVEAL_GAP = LOTTO_MAX_CLAIM_GAP  # 하위 호환

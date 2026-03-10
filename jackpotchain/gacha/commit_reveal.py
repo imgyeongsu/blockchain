@@ -2,7 +2,7 @@
 로또 시스템: Commit-Claim 패턴 (16-2 Final 기준)
 
 - Commit: 6자리 hex 숫자 배열 제출 (각 0x0 ~ 0xf)
-- Claim: N+30 이후, 6개 블록 해시와 비교하여 등급 판정
+- Claim: N+18 이후, 6개 블록 해시와 비교하여 등급 판정
 - 등급: 일치 개수에 따라 1~6등/꽝
 """
 
@@ -30,10 +30,10 @@ from ..constants import (
 
 class CommitStatus(Enum):
     """커밋 상태"""
-    PENDING = "pending"          # Claim 대기 중 (N+30 이전)
-    CLAIMABLE = "claimable"      # Claim 가능 (N+30 ~ N+80)
+    PENDING = "pending"          # Claim 대기 중 (N+18 이전)
+    CLAIMABLE = "claimable"      # Claim 가능 (N+18 ~ N+80)
     CLAIMED = "claimed"          # Claim 완료
-    EXPIRED = "expired"          # 기한 만료 (N+80 이후)
+    EXPIRED = "expired"          # 기한 만료 (N+80 이후, 62블록 여유)
     INVALID = "invalid"          # 무효
 
 
@@ -129,7 +129,7 @@ def calculate_result_digits(comparison_block_hashes: List[bytes]) -> List[int]:
     6개 비교 블록 해시에서 결과 숫자 배열 추출
 
     Args:
-        comparison_block_hashes: [Block(N+5).hash, Block(N+10).hash, ..., Block(N+30).hash]
+        comparison_block_hashes: [Block(N+3).hash, Block(N+6).hash, ..., Block(N+18).hash]
 
     Returns:
         result_digits: [d1, d2, d3, d4, d5, d6] 각 0~15
@@ -217,7 +217,7 @@ def get_comparison_heights(commit_height: int) -> List[int]:
         commit_height: Commit이 포함된 블록 높이 N
 
     Returns:
-        [N+5, N+10, N+15, N+20, N+25, N+30]
+        [N+3, N+6, N+9, N+12, N+15, N+18]
     """
     return [commit_height + offset for offset in LOTTO_COMPARISON_OFFSETS]
 
@@ -236,10 +236,10 @@ def is_claim_valid(commit_height: int, claim_height: int) -> Tuple[bool, str]:
     gap = claim_height - commit_height
 
     if gap < LOTTO_MIN_CLAIM_GAP:
-        return False, f"Too early: gap {gap} < min {LOTTO_MIN_CLAIM_GAP} (need N+30)"
+        return False, f"Too early: gap {gap} < min {LOTTO_MIN_CLAIM_GAP} (need N+18)"
 
     if gap > LOTTO_MAX_CLAIM_GAP:
-        return False, f"Expired: gap {gap} > max {LOTTO_MAX_CLAIM_GAP} (deadline N+80)"
+        return False, f"Expired: gap {gap} > max {LOTTO_MAX_CLAIM_GAP} (deadline N+{LOTTO_MAX_CLAIM_GAP})"
 
     return True, "OK"
 

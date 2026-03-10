@@ -86,8 +86,8 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 
 현재 구현 (`jackpotchain/gacha/*`, `constants.py`):
 - Commit: 6자리 hex 숫자 배열 [0x0~0xf] 선택
-- Claim: N+30 ~ N+80 블록 내 결과 확정
-- 비교 블록: N+5, N+10, N+15, N+20, N+25, N+30 해시 마지막 자리
+- Claim: N+18 ~ N+80 블록 내 결과 확정
+- 비교 블록: N+3, N+6, N+9, N+12, N+15, N+18 해시 마지막 자리
 - TX 버전: Commit=3, Claim=5
 
 등급별 보상:

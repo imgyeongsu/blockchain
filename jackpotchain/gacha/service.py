@@ -618,7 +618,7 @@ class GachaService:
         if not pending:
             return None, "Pending commit not found"
 
-        # 타이밍 검증 (N+30 ~ N+80)
+        # 타이밍 검증 (N+18 ~ N+80)
         if pending.block_height > 0:
             valid, reason = is_claim_valid(pending.block_height, current_height)
             if not valid:

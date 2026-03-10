@@ -198,11 +198,11 @@ class TestClaimTiming:
     def test_comparison_heights(self):
         """비교 블록 높이 계산"""
         heights = get_comparison_heights(500)
-        assert heights == [505, 510, 515, 520, 525, 530]
+        assert heights == [503, 506, 509, 512, 515, 518]
 
-    def test_claim_valid_at_n30(self):
-        """N+30에서 Claim 가능"""
-        valid, _ = is_claim_valid(500, 530)
+    def test_claim_valid_at_n18(self):
+        """N+18에서 Claim 가능"""
+        valid, _ = is_claim_valid(500, 518)
         assert valid is True
 
     def test_claim_valid_at_n80(self):
@@ -211,8 +211,8 @@ class TestClaimTiming:
         assert valid is True
 
     def test_claim_too_early(self):
-        """N+30 이전 Claim 불가"""
-        valid, reason = is_claim_valid(500, 529)
+        """N+18 이전 Claim 불가"""
+        valid, reason = is_claim_valid(500, 517)
         assert valid is False
         assert "early" in reason.lower()
 

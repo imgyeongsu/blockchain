@@ -472,8 +472,8 @@ class RPCServer:
             'pending_commits': stats['pending_commits'],
             'digit_count': 6,
             'digit_base': 16,
-            'comparison_blocks': 'N+5, N+10, N+15, N+20, N+25, N+30',
-            'claim_window': 'N+30 ~ N+80',
+            'comparison_blocks': 'N+3, N+6, N+9, N+12, N+15, N+18',
+            'claim_window': 'N+18 ~ N+80',
             'prize_table': {
                 '1st (6 matches)': 'Jackpot Pool 50%',
                 '2nd (5 matches)': '100,000 JACK',
@@ -549,9 +549,9 @@ class RPCServer:
             'chosen_numbers': pending.chosen_numbers,
             'chosen_hex': [hex(n) for n in pending.chosen_numbers],
             'tx_id': tx.get_txid().hex(),
-            'comparison_blocks': f"N+5, N+10, N+15, N+20, N+25, N+30 (where N = commit block)",
-            'claim_window': "N+30 ~ N+80",
-            'message': "Commit created. Wait for N+30 blocks to claim result."
+            'comparison_blocks': f"N+3, N+6, N+9, N+12, N+15, N+18 (where N = commit block)",
+            'claim_window': "N+18 ~ N+80",
+            'message': "Commit created. Wait for N+18 blocks to claim result."
         }
 
     async def _lottoclaim(self, commit_hash: str) -> dict:

@@ -3,7 +3,7 @@
 
 Flow:
 1. Commit TX (v3): 6자리 숫자 선택 + 1 POT 참가비
-2. 30블록 대기 (N+30까지)
+2. 18블록 대기 (N+18까지)
 3. Claim TX (v5): 6개 블록 해시와 비교하여 등급 판정 및 보상 수령
 """
 
@@ -353,7 +353,7 @@ class LottoGame:
         if commit.claim_height is not None:
             return False, "Already claimed"
 
-        # 타이밍 검증 (N+30 ~ N+80)
+        # 타이밍 검증 (N+18 ~ N+80)
         valid, reason = is_claim_valid(commit.commit_height, current_height)
         if not valid:
             return False, reason
