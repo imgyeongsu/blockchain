@@ -1,6 +1,5 @@
-# JackpotChain dependencies (merged)
-# - direct deps from package intent
-# - pinned transitive deps for reproducible local environment
+# JackpotChain dependencies
+# pip install -r requirements.txt
 
 # Direct runtime deps
 aiohttp==3.13.3

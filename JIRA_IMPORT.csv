@@ -1,0 +1,51 @@
+Summary,Issue Type,Epic Link,Story Points,Assignee,Status,Description
+Blockchain,Epic,,,,To Do,JackpotChain 블록체인 핵심 구현
+Core (자료구조 + 암호화),Story,Blockchain,,,To Do,상수/암호화/자료구조 구현
+전역 상수 정의,Task,Blockchain,1,,To Do,네트워크/블록/보상/로또 파라미터
+해시 함수 (SHA256/HASH160),Task,Blockchain,2,,To Do,SHA256 SHA256d HASH160 구현
+ECDSA 서명/검증,Task,Blockchain,3,,To Do,KeyPair 생성 및 서명/검증
+주소 생성 (Base58Check),Task,Blockchain,2,,To Do,공개키→주소 변환 및 검증
+머클 트리,Task,Blockchain,2,,To Do,트랜잭션 머클루트 계산
+트랜잭션 구조체,Task,Blockchain,3,,To Do,TxInput/TxOutput/Transaction 클래스
+블록 구조체,Task,Blockchain,2,,To Do,BlockHeader/Block 클래스
+UTXO 모델,Task,Blockchain,5,,To Do,UTXOSet apply/revert 구현
+Consensus (합의 + 검증),Story,Blockchain,,,To Do,PoW 합의 및 검증 로직
+난이도 조정 알고리즘,Task,Blockchain,3,,To Do,50블록마다 난이도 재계산
+PoW 채굴,Task,Blockchain,3,,To Do,코인베이스/블록템플릿/Nonce탐색
+블록체인 관리,Task,Blockchain,5,,To Do,블록 추가/조회/상태 관리
+Reorg 처리,Task,Blockchain,5,,To Do,체인 재구성 및 UTXO 되돌리기
+트랜잭션 검증,Task,Blockchain,3,,To Do,UTXO/서명/잔액 검증
+블록 검증,Task,Blockchain,3,,To Do,헤더/PoW/머클루트 검증
+제네시스 블록,Task,Blockchain,1,,To Do,하드코딩된 제네시스 생성
+Block Locator,Task,Blockchain,2,,To Do,IBD용 지수간격 로케이터
+Network (P2P + 동기화),Story,Blockchain,,,To Do,P2P 네트워크 및 블록 동기화
+피어 데이터 구조,Task,Blockchain,2,,To Do,PeerAddress/PeerState/PeerInfo
+프로토콜 메시지,Task,Blockchain,3,,To Do,VERSION/INV/BLOCK 등 메시지 정의
+피어 발견,Task,Blockchain,3,,To Do,DNS시드/하드코딩/peers.json
+NAT Traversal,Task,Blockchain,8,,To Do,PCP/NAT-PMP/UPnP 포트매핑
+P2P 노드,Task,Blockchain,5,,To Do,TCP 서버/클라이언트 구현
+핸드셰이크,Task,Blockchain,2,,To Do,VERSION/VERACK 교환
+메시지 핸들링,Task,Blockchain,3,,To Do,메시지별 핸들러 라우팅
+IBD (블록 동기화),Task,Blockchain,3,,To Do,GETBLOCKS/INV/GETDATA 흐름
+TCP Hole Punching,Task,Blockchain,5,,To Do,랑데부 서버/홀펀치 클라이언트
+블록/TX 전파,Task,Blockchain,2,,To Do,broadcast_block/broadcast_tx
+Application (로또 + 지갑 + 에셋),Story,Blockchain,,,To Do,로또/지갑/에셋 기능 구현
+스크립트 OP 코드,Task,Blockchain,2,,To Do,OP_DUP/OP_HASH160 등 정의
+P2PKH 스크립트,Task,Blockchain,2,,To Do,표준 잠금/해제 스크립트
+스크립트 인터프리터,Task,Blockchain,5,,To Do,스택기반 실행 엔진
+지갑 (키 관리),Task,Blockchain,3,,To Do,키페어 생성/저장/로드
+TX 생성/서명,Task,Blockchain,3,,To Do,UTXO 선택 및 트랜잭션 서명
+JACK/POT 멀티 에셋,Task,Blockchain,2,,To Do,듀얼 에셋 잔액 관리
+JACK↔POT 교환,Task,Blockchain,2,,To Do,100:1 비율 교환 서비스
+Commit-Reveal 패턴,Task,Blockchain,3,,To Do,커밋해시 생성/검증
+잭팟 풀 관리,Task,Blockchain,3,,To Do,풀 자금/등수별 보상 계산
+로또 서비스,Task,Blockchain,5,,To Do,Commit→Claim 전체 흐름
+Infra (CLI + RPC + 저장소 + 테스트),Story,Blockchain,,,To Do,인프라 및 테스트 구현
+블록 저장소,Task,Blockchain,3,,To Do,.blk 파일 저장/인덱스 관리
+멤풀,Task,Blockchain,3,,To Do,TX 풀 및 수수료 정렬
+RPC 서버,Task,Blockchain,5,,To Do,JSON-RPC 2.0 API 서버
+CLI 명령어,Task,Blockchain,3,,To Do,start/mine/send/lotto 명령
+Core 테스트,Task,Blockchain,2,,To Do,TX/Block/UTXO 테스트
+Crypto 테스트,Task,Blockchain,2,,To Do,해시/서명/주소 테스트
+Network 테스트,Task,Blockchain,2,,To Do,메시지/피어/핸드셰이크 테스트
+Gacha 테스트,Task,Blockchain,3,,To Do,로또 시스템 통합 테스트
