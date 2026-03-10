@@ -76,7 +76,7 @@ LOTTO_COMPARISON_OFFSETS = [3, 6, 9, 12, 15, 18]  # N+3, N+6, ..., N+18
 
 # Claim 윈도우
 LOTTO_MIN_CLAIM_GAP = 18         # N+18 이후 Claim 가능
-LOTTO_MAX_CLAIM_GAP = 80         # N+80까지 Claim 가능 (50블록 여유)
+LOTTO_MAX_CLAIM_GAP = 68         # N+68까지 Claim 가능 (50블록 여유)
 GACHA_MIN_REVEAL_GAP = LOTTO_MIN_CLAIM_GAP  # 하위 호환
 GACHA_MAX_REVEAL_GAP = LOTTO_MAX_CLAIM_GAP  # 하위 호환
 
