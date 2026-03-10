@@ -9,7 +9,7 @@
 ### 프로젝트 요약
 - **목표**: 가챠 시스템이 내장된 UTXO 기반 블록체인
 - **에셋**: JACK (네이티브 코인) + POT (가챠 토큰)
-- **합의**: PoW (15초 블록 타임)
+- **합의**: PoW (30초 블록 타임)
 - **특징**: Commit-Reveal 기반 탈중앙화 가챠
 
 ### 기술 스택 (권장)
@@ -254,7 +254,7 @@
 파일: consensus/difficulty.py
 
 상수:
-  □ TARGET_BLOCK_TIME = 15        # 목표 블록 간격 (초)
+  □ TARGET_BLOCK_TIME = 30        # 목표 블록 간격 (초)
   □ DIFFICULTY_ADJUSTMENT_INTERVAL = 50  # 조절 주기 (블록)
   □ MAX_ADJUSTMENT_FACTOR = 4     # 최대 조절 배율
 
@@ -916,7 +916,7 @@ tests/scenarios/
 ## 핵심 파라미터 요약
 
 ```
-블록 타임:          15초
+블록 타임:          30초
 블록 크기:          1 MB
 블록 보상:          50 JACK (고정)
 난이도 조절 주기:   50 블록

@@ -532,7 +532,7 @@ bench_ibd_speed:
 
 ```
 test_sustained_load:
-  15초마다 TX 200개씩 30분간
+  30초마다 TX 200개씩 30분간
   확인: 블록 처리 시간 안정적? 메모리 누수 없음?
 
 test_mempool_pressure:

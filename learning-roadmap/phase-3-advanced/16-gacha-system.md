@@ -693,7 +693,7 @@ Reveal TX (당첨):
 
 ```
 규칙:
-  Commit 후 50블록(~12.5분) 이내에 Reveal 해야 함
+  Commit 후 50블록(~25분) 이내에 Reveal 해야 함
 
   Commit: Block #500
   Reveal 가능: Block #502 ~ #550

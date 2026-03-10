@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # ── 파라미터 ───────────────────────────────────────────
-TARGET_BLOCK_TIME   = 15      # 목표 블록 타임 (초)
+TARGET_BLOCK_TIME   = 30      # 목표 블록 타임 (초)
 DIFFICULTY_ADJUST   = 50      # 난이도 조정 주기 (블록 수)
 REWARD_JACK         = 50.0    # 블록 보상 (JACK)
 FORK_RATE           = 0.13    # 포크 발생 확률

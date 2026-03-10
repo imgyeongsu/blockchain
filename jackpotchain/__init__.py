@@ -5,7 +5,7 @@ Features:
 - UTXO 기반 (Bitcoin 스타일)
 - 듀얼 에셋: JACK (기본), POT (가챠 토큰)
 - Commit-Reveal 기반 공정한 가챠
-- 15초 블록 타임
+- 30초 블록 타임
 """
 
 __version__ = "0.1.0"

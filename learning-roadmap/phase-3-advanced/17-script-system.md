@@ -372,7 +372,7 @@ script_pubkey:
 
 === CSV (CheckSequenceVerify) — 상대 시간 ===
 
-"이 UTXO가 생성된 후 100블록(~25분) 이후에만 소비 가능"
+"이 UTXO가 생성된 후 100블록(~50분) 이후에만 소비 가능"
 
 script_pubkey:
   <100>
@@ -420,8 +420,8 @@ script_pubkey:
     → 체인 Reorg로 Coinbase가 무효화될 위험 방지
 
   JackpotChain:
-    블록 타임 15초 → 100블록 = 25분
-    또는 50블록 = 12.5분 (조정 가능)
+    블록 타임 30초 → 100블록 = 50분
+    또는 50블록 = 25분 (조정 가능)
 
   구현:
     Script로 넣지 않고 프로토콜에서 강제 (Bitcoin과 동일)
@@ -435,7 +435,7 @@ script_pubkey:
     OP_IF
       OP_DUP OP_HASH160 <bob_hash> OP_EQUALVERIFY OP_CHECKSIG
     OP_ELSE
-      <672>                      ← 672블록 ≈ 7일 (15초 × 672 = 2.8시간... 수정: 40320블록 ≈ 7일)
+      <672>                      ← 672블록 ≈ 7일 아님 (30초 × 672 = 5.6시간... 수정: 20160블록 ≈ 7일)
       OP_CHECKLOCKTIMEVERIFY
       OP_DROP
       OP_DUP OP_HASH160 <alice_hash> OP_EQUALVERIFY OP_CHECKSIG
