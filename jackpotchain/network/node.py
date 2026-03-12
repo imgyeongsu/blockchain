@@ -348,6 +348,7 @@ class Node:
     async def _handle_version(self, address: PeerAddress, payload: bytes):
         """VERSION 메시지 처리"""
         version_msg = VersionMessage.deserialize(payload)
+        print(f"[SYNC] VERSION 수신: height={version_msg.start_height} from {address.ip}:{address.port}")
         self.peer_manager.update_peer_version(address, version_msg)
         self.peer_manager.update_peer_height(address, version_msg.start_height)
         peer = self.peer_manager.get_peer(address)
@@ -362,6 +363,10 @@ class Node:
         if peer and peer.is_inbound:
             await self._send_version(address)
 
+        # 아웃바운드면 VERSION 수신 후 동기화 체크 (피어 height 확인됨)
+        if peer and not peer.is_inbound and peer.state == PeerState.READY:
+            await self._check_sync(address)
+
     async def _handle_verack(self, address: PeerAddress):
         """VERACK 메시지 처리"""
         self.peer_manager.update_peer_state(address, PeerState.READY)
@@ -372,10 +377,16 @@ class Node:
         # 피어에게 주소 요청
         await self._send_getaddr(address)
 
-        # 피어 높이가 더 높으면 블록 동기화 요청 (IBD)
+        # 동기화 체크 (아웃바운드는 VERSION 수신 후에 체크)
+        peer = self.peer_manager.get_peer(address)
+        if peer and peer.is_inbound:
+            # 인바운드면 VERACK 받은 후 동기화 체크
+            await self._check_sync(address)
+
+    async def _check_sync(self, address: PeerAddress):
+        """동기화 필요 여부 확인 및 시작"""
         peer = self.peer_manager.get_peer(address)
         if peer and peer.start_height > self.height:
-            # [SYNC-LOG] IBD 시작
             print(f"[SYNC] IBD 시작: 로컬={self.height}, 피어={peer.start_height}, 주소={address.ip}:{address.port}")
             await self._request_blocks(address)
         else:
@@ -600,6 +611,7 @@ class Node:
 
     async def _send_version(self, address: PeerAddress):
         """VERSION 전송"""
+        print(f"[SYNC] VERSION 전송: height={self.height} to {address.ip}:{address.port}")
         version_msg = VersionMessage(
             timestamp=int(time.time()),
             nonce=self._nonce,
