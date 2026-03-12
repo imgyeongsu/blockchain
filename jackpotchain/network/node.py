@@ -375,7 +375,11 @@ class Node:
         # 피어 높이가 더 높으면 블록 동기화 요청 (IBD)
         peer = self.peer_manager.get_peer(address)
         if peer and peer.start_height > self.height:
+            # [SYNC-LOG] IBD 시작
+            print(f"[SYNC] IBD 시작: 로컬={self.height}, 피어={peer.start_height}, 주소={address.ip}:{address.port}")
             await self._request_blocks(address)
+        else:
+            print(f"[SYNC] 동기화 불필요: 로컬={self.height}, 피어={peer.start_height if peer else 'N/A'}")
 
     async def _handle_ping(self, address: PeerAddress, payload: bytes):
         """PING 처리"""
@@ -384,6 +388,11 @@ class Node:
     async def _handle_inv(self, address: PeerAddress, payload: bytes):
         """INV 처리 - 새로운 블록/TX 알림"""
         inv_msg = InvMessage.deserialize(payload)
+
+        # [SYNC-LOG] INV 수신
+        block_count = sum(1 for i in inv_msg.items if i.inv_type == InvType.BLOCK)
+        tx_count = sum(1 for i in inv_msg.items if i.inv_type == InvType.TX)
+        print(f"[SYNC] INV 수신: 블록 {block_count}개, TX {tx_count}개 from {address.ip}:{address.port}")
 
         # 모르는 것만 요청
         to_fetch = []
@@ -397,6 +406,8 @@ class Node:
                     to_fetch.append(item)
 
         if to_fetch:
+            # [SYNC-LOG] GETDATA 요청
+            print(f"[SYNC] GETDATA 요청: {len(to_fetch)}개 아이템")
             getdata = GetDataMessage(items=to_fetch)
             await self._send_message(address, MessageType.GETDATA, getdata.serialize())
 
@@ -421,10 +432,14 @@ class Node:
         block, _ = Block.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
 
+        # [SYNC-LOG] BLOCK 수신
+        print(f"[SYNC] BLOCK 수신: hash={block.get_hash().hex()[:16]}... from {address.ip}:{address.port}")
+
         # 이전 블록이 없으면 동기화 요청
         prev_hash = block.header.prev_block_hash
         if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
             # 이전 블록들이 필요함 - GETBLOCKS 요청
+            print(f"[SYNC] 이전 블록 없음, GETBLOCKS 요청 (prev={prev_hash.hex()[:16]}...)")
             await self._request_blocks(address)
             return
 
@@ -443,15 +458,22 @@ class Node:
         """GETBLOCKS 처리"""
         msg = GetBlocksMessage.deserialize(payload)
 
+        # [SYNC-LOG] GETBLOCKS 수신
+        print(f"[SYNC] GETBLOCKS 수신 from {address.ip}:{address.port}, locator 크기: {len(msg.block_locator)}")
+
         # 분기점 찾기
         fork_height, _ = self.blockchain.find_fork_point(msg.block_locator)
+        print(f"[SYNC] 분기점: height={fork_height}")
 
         # INV 전송
         hashes = self.blockchain.get_chain_hashes(fork_height + 1, 500)
         items = [InvItem(InvType.BLOCK, h) for h in hashes]
         if items:
+            print(f"[SYNC] INV 응답: {len(items)}개 블록 해시 전송")
             inv = InvMessage(items)
             await self._send_message(address, MessageType.INV, inv.serialize())
+        else:
+            print(f"[SYNC] INV 응답: 전송할 블록 없음")
 
     async def _handle_getheaders(self, address: PeerAddress, payload: bytes):
         """GETHEADERS 처리 - 블록 헤더 목록 반환"""
@@ -571,6 +593,8 @@ class Node:
         """블록 동기화 요청 (GETBLOCKS)"""
         # Block locator 생성: 최근 블록들의 해시
         locator = self.blockchain.get_block_locator()
+        # [SYNC-LOG] GETBLOCKS 요청
+        print(f"[SYNC] GETBLOCKS 요청: locator 크기={len(locator)}, 현재 높이={self.blockchain.get_height()}")
         msg = GetBlocksMessage(block_locator=locator)
         await self._send_message(address, MessageType.GETBLOCKS, msg.serialize())
 
