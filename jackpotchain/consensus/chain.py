@@ -201,11 +201,13 @@ class Blockchain:
 
         # 이미 존재하면 무시
         if block_hash in self._blocks:
+            print(f"[CHAIN] 블록 추가 실패: 이미 존재 (hash={block_hash.hex()[:16]}...)")
             return False, "Block already exists"
 
         # 이전 블록 확인
         prev_hash = block.header.prev_block_hash
         if prev_hash not in self._block_index:
+            print(f"[CHAIN] 블록 추가 실패: 이전 블록 없음 (prev={prev_hash.hex()[:16]}...)")
             return False, "Previous block not found"
 
         prev_index = self._block_index[prev_hash]
@@ -260,8 +262,10 @@ class Blockchain:
             if self._store:
                 self._store.save_block(block, new_height)
 
+            print(f"[CHAIN] 블록 추가 성공: height={new_height}, hash={block_hash.hex()[:16]}...")
             return True, "Block added to main chain"
         else:
+            print(f"[CHAIN] 사이드 체인에 추가: hash={block_hash.hex()[:16]}...")
             return True, "Block added to side chain"
 
     def _reorganize(self, old_tip_hash: bytes, new_tip_hash: bytes):
