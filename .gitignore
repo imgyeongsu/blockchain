@@ -21,3 +21,4 @@ dist/
 
 # Vite 캐시
 .vite/
+data2/
