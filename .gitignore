@@ -7,6 +7,7 @@ __pycache__/
 *.pyo
 data/
 wallet.json
+jp-aws/
 
 # ── Frontend (Node.js) ────────────────────────────────────
 node_modules/
