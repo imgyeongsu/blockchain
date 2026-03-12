@@ -1,0 +1,17 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
+import Home from '../views/Home.vue'
+import Chapter1 from '../views/Chapter1.vue'
+import Chapter2 from '../views/Chapter2.vue'
+import Chapter3 from '../views/Chapter3.vue'
+
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    { path: '/', component: Home },
+    { path: '/chapter1', component: Chapter1 },
+    { path: '/chapter2', component: Chapter2 },
+    { path: '/chapter3', component: Chapter3 },
+  ],
+})
+
+export default router

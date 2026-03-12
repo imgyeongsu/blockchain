@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* { box-sizing: border-box; }
+
+body {
+  background-color: #080808;
+  color: #f0f0f0;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  margin: 0;
+  min-height: 100vh;
+}
+
+a { text-decoration: none; }
+
+/* Glass card */
+.glass-card {
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+}
+
+.glass-card-hover {
+  background: rgba(255,255,255,0.06);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 16px;
+  transition: all 0.2s ease;
+}
+.glass-card-hover:hover {
+  border-color: rgba(0,122,255,0.4);
+  background: rgba(255,255,255,0.09);
+}
+
+/* Status badges */
+.badge-success { background: rgba(0,255,136,0.15); color: #00FF88; border: 1px solid rgba(0,255,136,0.3); border-radius: 6px; padding: 2px 8px; font-size: 0.7rem; }
+.badge-warning { background: rgba(255,200,0,0.15); color: #FFD700; border: 1px solid rgba(255,200,0,0.3); border-radius: 6px; padding: 2px 8px; font-size: 0.7rem; }
+.badge-error   { background: rgba(255,69,58,0.15);  color: #FF453A; border: 1px solid rgba(255,69,58,0.3);  border-radius: 6px; padding: 2px 8px; font-size: 0.7rem; }
+.badge-info    { background: rgba(0,122,255,0.15);  color: #007AFF; border: 1px solid rgba(0,122,255,0.3);  border-radius: 6px; padding: 2px 8px; font-size: 0.7rem; }
+
+/* Btn primary */
+.btn-primary {
+  background: #007AFF;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 24px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-primary:hover  { background: #0066dd; }
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary:disabled { background: #333; color: #666; cursor: not-allowed; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+
+/* Progress bar */
+.progress-bar { height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg,#007AFF,#00FF88); border-radius: 2px; transition: width 0.3s ease; }
+
+/* Toast */
+.toast-enter { opacity: 0; transform: translateY(-10px); }
+.toast-enter-active { transition: all 0.3s ease; }
+.toast-enter-done { opacity: 1; transform: translateY(0); }
+.toast-exit-active { transition: all 0.3s ease; opacity: 0; transform: translateY(-10px); }

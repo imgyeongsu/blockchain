@@ -13,6 +13,7 @@ from enum import Enum
 from ..core.block import Block, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
+from ..script.standard import get_address_from_script_pubkey
 
 
 class ChainState(Enum):
@@ -114,7 +115,7 @@ class Blockchain:
 
                     # UTXO 업데이트
                     for tx in block.transactions:
-                        self.utxo_set.apply_transaction(tx, height)
+                        self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
 
             print(f"[Chain] Loaded {tip_height + 1} blocks. Height: {self.get_height()}")
 
@@ -345,7 +346,7 @@ class Blockchain:
 
         for tx in block.transactions:
             # UTXO 적용 및 소비된 UTXO 저장
-            spent_utxos = self.utxo_set.apply_transaction(tx, height)
+            spent_utxos = self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
             undo_data.append(spent_utxos)
 
         # Undo 데이터 저장 (나중에 disconnect용)
@@ -368,7 +369,7 @@ class Blockchain:
         for i in range(len(block.transactions) - 1, -1, -1):
             tx = block.transactions[i]
             spent_utxos = undo_data[i] if i < len(undo_data) else []
-            self.utxo_set.revert_transaction(tx, spent_utxos)
+            self.utxo_set.revert_transaction(tx, spent_utxos, get_address_from_script_pubkey)
 
         # Undo 데이터 제거
         self._undo_data.pop(block_hash, None)
