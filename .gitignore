@@ -6,3 +6,4 @@ __pycache__/
 *.pyo
 data/
 wallet.json
+jp-aws/
