@@ -1,3 +1,4 @@
+# ── Python ────────────────────────────────────────────────
 .venv
 gs_test
 .CLAUDE
@@ -6,3 +7,16 @@ __pycache__/
 *.pyo
 data/
 wallet.json
+
+# ── Frontend (Node.js) ────────────────────────────────────
+node_modules/
+dist/
+.DS_Store
+
+# .env는 로컬 설정값 포함 — .env.example만 커밋
+.env
+.env.local
+.env.*.local
+
+# Vite 캐시
+.vite/
