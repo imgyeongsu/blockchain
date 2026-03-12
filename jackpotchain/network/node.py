@@ -101,6 +101,10 @@ class Node:
         # GETADDR 요청 시간 추적 (스팸 방지)
         self._last_getaddr: Dict[PeerAddress, float] = {}
 
+        # 순차 블록 동기화용
+        self._pending_blocks: List[bytes] = []  # 대기 중인 블록 해시 목록
+        self._sync_peer: Optional[PeerAddress] = None  # 동기화 중인 피어
+
     @property
     def height(self) -> int:
         return self.blockchain.get_height()
@@ -405,22 +409,41 @@ class Node:
         tx_count = sum(1 for i in inv_msg.items if i.inv_type == InvType.TX)
         print(f"[SYNC] INV 수신: 블록 {block_count}개, TX {tx_count}개 from {address.ip}:{address.port}")
 
-        # 모르는 것만 요청
-        to_fetch = []
+        # TX는 바로 요청
+        tx_to_fetch = []
+        for item in inv_msg.items:
+            if item.inv_type == InvType.TX:
+                if self.mempool and not self.mempool.has_tx(item.hash):
+                    tx_to_fetch.append(item)
+
+        if tx_to_fetch:
+            getdata = GetDataMessage(items=tx_to_fetch)
+            await self._send_message(address, MessageType.GETDATA, getdata.serialize())
+
+        # 블록은 순차 요청 (pending 큐에 저장)
+        block_hashes = []
         for item in inv_msg.items:
             if item.inv_type == InvType.BLOCK:
                 if not self.blockchain.has_block(item.hash):
-                    to_fetch.append(item)
-            elif item.inv_type == InvType.TX:
-                # Mempool에 없는 TX만 요청
-                if self.mempool and not self.mempool.has_tx(item.hash):
-                    to_fetch.append(item)
+                    block_hashes.append(item.hash)
 
-        if to_fetch:
-            # [SYNC-LOG] GETDATA 요청
-            print(f"[SYNC] GETDATA 요청: {len(to_fetch)}개 아이템")
-            getdata = GetDataMessage(items=to_fetch)
-            await self._send_message(address, MessageType.GETDATA, getdata.serialize())
+        if block_hashes:
+            self._pending_blocks = block_hashes
+            self._sync_peer = address
+            print(f"[SYNC] 블록 {len(block_hashes)}개 대기열에 추가, 순차 다운로드 시작")
+            await self._request_next_block()
+
+    async def _request_next_block(self):
+        """대기 중인 다음 블록 요청"""
+        if not self._pending_blocks or not self._sync_peer:
+            return
+
+        # 첫 번째 블록 요청
+        block_hash = self._pending_blocks[0]
+        item = InvItem(InvType.BLOCK, block_hash)
+        getdata = GetDataMessage(items=[item])
+        print(f"[SYNC] GETDATA 요청: 1개 블록 (대기: {len(self._pending_blocks)}개)")
+        await self._send_message(self._sync_peer, MessageType.GETDATA, getdata.serialize())
 
     async def _handle_getdata(self, address: PeerAddress, payload: bytes):
         """GETDATA 처리"""
@@ -442,9 +465,10 @@ class Node:
         """BLOCK 수신"""
         block, _ = Block.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
+        block_hash = block.get_hash()
 
         # [SYNC-LOG] BLOCK 수신
-        print(f"[SYNC] BLOCK 수신: hash={block.get_hash().hex()[:16]}... from {address.ip}:{address.port}")
+        print(f"[SYNC] BLOCK 수신: hash={block_hash.hex()[:16]}... from {address.ip}:{address.port}")
 
         # 이전 블록이 없으면 동기화 요청
         prev_hash = block.header.prev_block_hash
@@ -454,8 +478,18 @@ class Node:
             await self._request_blocks(address)
             return
 
+        # 콜백 호출 (블록 체인에 추가)
         if self._on_block:
             self._on_block(block, peer)
+
+        # 순차 동기화: 처리된 블록 제거 후 다음 블록 요청
+        if block_hash in self._pending_blocks:
+            self._pending_blocks.remove(block_hash)
+            if self._pending_blocks:
+                await self._request_next_block()
+            else:
+                print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
+                self._sync_peer = None
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
         """TX 수신"""

@@ -199,7 +199,23 @@ def run_node(args):
                   f"Mined: {mining_stats['blocks_mined']} blocks | "
                   f"Hashrate: {hashrate:.0f} H/s")
 
+    def on_block_received(block, peer):
+        """피어로부터 블록 수신시 처리"""
+        success, msg = blockchain.add_block(block)
+        if success:
+            print(f"[CHAIN] 피어 블록 추가 성공: height={blockchain.get_height()}")
+            # Mempool에서 포함된 TX 제거
+            for tx in block.transactions[1:]:  # coinbase 제외
+                mempool.remove_tx(tx.get_txid())
+        else:
+            # 이미 있는 블록이면 무시 (중복 수신)
+            if "already exists" not in msg.lower():
+                print(f"[CHAIN] 피어 블록 추가 실패: {msg}")
+
     async def run():
+        # 블록 수신 콜백 설정
+        node.set_block_callback(on_block_received)
+
         await node.start()
         await rpc.start()
 
