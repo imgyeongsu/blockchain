@@ -173,12 +173,18 @@ class Block:
 
 def create_genesis_block(miner_address: str = None) -> Block:
     """
-    Genesis Block 생성
+    Genesis Block 생성 (하드코딩)
     - Output 0: 블록 보상 50 JACK (채굴자)
     - Output 1: 잭팟풀 초기 자금 1,000,000 JACK
+
+    모든 노드가 동일한 제네시스 블록을 사용하도록 값이 하드코딩됨.
     """
     from ..crypto.address import JACKPOT_POOL_ADDRESS
-    from ..constants import GENESIS_JACKPOT_POOL_FUNDING
+    from ..constants import (
+        GENESIS_JACKPOT_POOL_FUNDING,
+        GENESIS_NONCE,
+        GENESIS_MERKLE_ROOT,
+    )
 
     # Genesis Coinbase TX
     coinbase_input = TxInput(
@@ -207,22 +213,16 @@ def create_genesis_block(miner_address: str = None) -> Block:
         locktime=0
     )
 
-    # 블록 헤더
+    # 블록 헤더 (하드코딩된 값 사용)
     header = BlockHeader(
         version=1,
         prev_block_hash=bytes(32),
-        merkle_root=bytes(32),  # 나중에 계산
+        merkle_root=GENESIS_MERKLE_ROOT,  # 하드코딩
         timestamp=GENESIS_TIMESTAMP,
         difficulty_target=INITIAL_DIFFICULTY,
-        nonce=0
+        nonce=GENESIS_NONCE  # 하드코딩
     )
 
     block = Block(header=header, transactions=[coinbase_tx])
-
-    # Merkle Root 계산
-    block.header.merkle_root = block.calculate_merkle_root()
-
-    # Genesis는 nonce 0으로 고정 (실제로는 채굴해야 함)
-    # MVP에서는 초기 난이도가 낮아서 0으로도 통과 가능
 
     return block

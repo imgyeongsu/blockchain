@@ -35,10 +35,8 @@ DNS_SEEDS = [
 
 # 하드코딩된 시드 노드 (DNS 실패 시 fallback)
 HARDCODED_SEEDS = [
+    ("54.116.13.57", 9333),  # AWS 시드 노드
     ("127.0.0.1", DEFAULT_PORT),  # 로컬 테스트용
-    # 실제 운영 시 공개 노드 IP 추가
-    # ("203.0.113.1", DEFAULT_PORT),
-    # ("203.0.113.2", DEFAULT_PORT),
 ]
 
 
