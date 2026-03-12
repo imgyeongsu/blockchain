@@ -129,6 +129,9 @@
             </div>
           </div>
 
+          <!-- 결과 보기 버튼 -->
+          <button class="btn-primary" @click="showResult">결과 확인하기 →</button>
+
           <!-- 실시간 SVG 라인 차트 -->
           <div class="glass-card chart-card">
             <div class="chart-title">📊 내 수입 vs 치킨 가격 (실시간)</div>
@@ -236,7 +239,7 @@ const {
   shakeChicken, shakeRent, shakeEgg,
   balanceHistory, chickenHistory,
   MAX_HISTORY, inflationProgress,
-  formatWon, earn, startGame: _startGame,
+  formatWon, earn, startGame: _startGame, stopGame,
 } = useInflationGame()
 
 const ch1EarnPerClick = CH1.EARN_PER_CLICK
@@ -258,7 +261,12 @@ const overlayStyle = computed(() => {
 // ─── 게임 시작 브릿지 ────────────────────────────────────
 function startGame() {
   step.value = 3
-  _startGame(step)
+  _startGame()
+}
+
+function showResult() {
+  stopGame()
+  step.value = 4
 }
 
 // ─── SVG 차트 포인트 계산 (뷰 표현 로직) ─────────────────

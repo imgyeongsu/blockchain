@@ -85,12 +85,25 @@ export function useInflationGame() {
     balance.value += CH1.EARN_PER_CLICK
   }
 
+  /** 게임 실행 중 여부 — tick/history 루프가 이 값을 보고 중단합니다. */
+  let running = false
+
   /** step 3 시작: 인플레이션 및 히스토리 추적 인터벌 시작 */
-  function startGame(stepRef) {
+  function startGame() {
+    running = true
     balanceHistory.value = [balance.value]
     chickenHistory.value = [chickenPrice.value]
-    startInflation(stepRef)
-    startHistoryTracking(stepRef)
+    startInflation()
+    startHistoryTracking()
+  }
+
+  /**
+   * 게임을 수동으로 종료합니다.
+   * Chapter1.vue의 "결과 보기" 버튼이 호출합니다.
+   */
+  function stopGame() {
+    running = false
+    clearAllIntervals()
   }
 
   function triggerShake(refObj) {
@@ -102,12 +115,13 @@ export function useInflationGame() {
    * 재귀 setTimeout 기반 인플레이션 틱.
    * inflationDoubled 상태에 따라 틱 간격이 동적으로 바뀌므로
    * setInterval 대신 setTimeout 재귀를 사용합니다.
+   * 자동 종료 없이 stopGame() 호출 전까지 계속 실행됩니다.
    */
-  function startInflation(stepRef) {
+  function startInflation() {
     const interval = () => (inflationDoubled.value ? CH1.INFLATION_FAST_MS : CH1.INFLATION_INTERVAL_MS)
 
     function tick() {
-      if (stepRef.value !== 3) return
+      if (!running) return
 
       chickenPrice.value += CH1.CHICKEN_RISE
       rentPrice.value += CH1.RENT_RISE
@@ -117,12 +131,6 @@ export function useInflationGame() {
       triggerShake(shakeRent)
       triggerShake(shakeEgg)
 
-      if (chickenPrice.value > CH1.GAME_OVER_PRICE) {
-        stepRef.value = 4
-        clearAllIntervals()
-        return
-      }
-
       inflationInterval = setTimeout(tick, interval())
     }
 
@@ -130,9 +138,9 @@ export function useInflationGame() {
   }
 
   /** 일정 주기로 잔액·가격 히스토리를 기록합니다 (SVG 차트용). */
-  function startHistoryTracking(stepRef) {
+  function startHistoryTracking() {
     historyInterval = setInterval(() => {
-      if (stepRef.value !== 3) return
+      if (!running) return
       balanceHistory.value.push(balance.value)
       chickenHistory.value.push(chickenPrice.value)
       if (balanceHistory.value.length > MAX_HISTORY) {
@@ -172,6 +180,6 @@ export function useInflationGame() {
     shakeChicken, shakeRent, shakeEgg,
     balanceHistory, chickenHistory,
     MAX_HISTORY, inflationProgress,
-    formatWon, earn, startGame,
+    formatWon, earn, startGame, stopGame,
   }
 }
