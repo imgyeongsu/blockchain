@@ -273,6 +273,51 @@ nat_result = await self.nat_manager.setup_port_mapping()
 
 ---
 
+## 4. 트랜잭션 문제
+
+### 4.1 서명 검증 실패
+
+**증상**
+```bash
+curl -d '{"method":"sendtoaddress","params":["주소", 100],"id":1}' http://127.0.0.1:8332
+# {"error": {"message": "Invalid TX: Input 0 signature verification failed"}}
+```
+
+**원인**
+1. 서명 해시 계산 방식 불일치
+   - 서명 시: script_sig가 비어있는 상태로 해시 계산
+   - 검증 시: script_sig가 채워진 상태로 해시 계산
+   - 결과: 해시 불일치 → 서명 검증 실패
+
+2. verify() 함수 파라미터 순서 오류
+   - 정의: `verify(message_hash, signature, public_key)`
+   - 잘못된 호출: `verify(pubkey, tx_hash, sig)`
+
+**해결**
+Bitcoin 표준 SIGHASH_ALL 방식 구현:
+
+```python
+# core/transaction.py
+def get_signature_hash(self, input_index: int, script_pubkey: bytes) -> bytes:
+    """Bitcoin SIGHASH_ALL 방식 서명 해시 계산"""
+    # 1. TX 복사
+    # 2. 모든 input의 script_sig 비움
+    # 3. 서명할 input의 script_sig를 이전 출력의 script_pubkey로 설정
+    # 4. 직렬화 + SIGHASH_ALL(0x01) 4바이트 추가
+    # 5. double SHA256
+
+# interpreter.py - 파라미터 순서 수정
+return verify(self.context.tx_hash, actual_sig, pubkey)  # hash, sig, pubkey 순서
+```
+
+**파일**:
+- `jackpotchain/core/transaction.py` - get_signature_hash() 추가
+- `jackpotchain/script/interpreter.py` - verify() 호출 순서 수정
+- `jackpotchain/validation/transaction.py` - get_signature_hash() 사용
+- `jackpotchain/wallet/wallet.py` - get_signature_hash() 사용
+
+---
+
 ## 디버깅 팁
 
 ### 로그 레벨 확인
