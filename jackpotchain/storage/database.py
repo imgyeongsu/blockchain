@@ -58,11 +58,19 @@ class BlockStore:
                     self._hash_to_height[block_hash] = height
 
     def _save_index(self):
-        """인덱스 저장"""
+        """인덱스 저장 (Atomic - 크래시 안전)"""
         index_file = self.index_dir / "height_index.dat"
-        with open(index_file, 'wb') as f:
+        temp_file = self.index_dir / "height_index.dat.tmp"
+
+        # 임시 파일에 먼저 저장
+        with open(temp_file, 'wb') as f:
             for height, block_hash in sorted(self._height_to_hash.items()):
                 f.write(struct.pack('<I', height) + block_hash)
+            f.flush()
+            os.fsync(f.fileno())  # 디스크에 확실히 기록
+
+        # 원자적 교체 (크래시 시에도 안전)
+        os.replace(temp_file, index_file)
 
     def _block_path(self, block_hash: bytes) -> Path:
         """블록 파일 경로"""

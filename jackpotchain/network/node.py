@@ -116,6 +116,11 @@ class Node:
             return self.nat_manager.external_address
         return None
 
+    @property
+    def is_syncing(self) -> bool:
+        """IBD(Initial Block Download) 중인지 확인"""
+        return self._sync_peer is not None or len(self._pending_blocks) > 0
+
     def set_block_callback(self, callback: Callable):
         """블록 수신 콜백 설정"""
         self._on_block = callback
