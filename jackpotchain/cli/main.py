@@ -77,7 +77,8 @@ def run_node(args):
     # 초기화 (영구 저장 활성화)
     blockchain = Blockchain(data_dir=args.data_dir)
     mempool = Mempool()
-    wallet = Wallet()
+    # TODO: --wallet 옵션으로 지갑 파일 분리 지원
+    wallet = Wallet("wallet.json")
 
     config = NodeConfig(
         port=args.port,
