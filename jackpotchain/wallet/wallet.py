@@ -280,9 +280,7 @@ class Wallet:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
-
+        # 각 입력에 대해 서명
         for i, (inp, utxo) in enumerate(zip(inputs, selected)):
             # 해당 UTXO의 주소에서 키 찾기
             address = self._find_address_for_utxo(utxo, utxo_set)
@@ -291,8 +289,11 @@ class Wallet:
 
             info = self._addresses[address]
 
+            # 서명 해시 계산 (Bitcoin SIGHASH_ALL 방식)
+            sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+
             # 서명 (message_hash, private_key 순서)
-            signature = sign(tx_hash, info.private_key)
+            signature = sign(sig_hash, info.private_key)
             script_sig = create_p2pkh_script_sig(signature, info.public_key)
             inp.script_sig = script_sig
 
@@ -309,15 +310,17 @@ class Wallet:
         utxos: List[UTXO]
     ) -> Tuple[bool, str]:
         """TX 서명"""
-        tx_hash = tx.get_txid()
-
         for i, (inp, utxo) in enumerate(zip(tx.inputs, utxos)):
             address = self._find_address_for_utxo(utxo, None)
             if address is None or address not in self._addresses:
                 return False, f"Cannot find key for input {i}"
 
             info = self._addresses[address]
-            signature = sign(tx_hash, info.private_key)
+
+            # 서명 해시 계산 (Bitcoin SIGHASH_ALL 방식)
+            sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+
+            signature = sign(sig_hash, info.private_key)
             script_sig = create_p2pkh_script_sig(signature, info.public_key)
             inp.script_sig = script_sig
 

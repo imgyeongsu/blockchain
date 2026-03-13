@@ -153,9 +153,6 @@ def validate_tx_scripts(
     if tx.is_coinbase():
         return TxValidationResult(is_valid=True)
 
-    # 서명 해시 계산 (간단 버전)
-    tx_hash = tx.get_txid()
-
     for idx, inp in enumerate(tx.inputs):
         # UTXO 조회
         utxo = utxo_set.get_utxo(inp.prev_tx_id, inp.output_index)
@@ -182,11 +179,14 @@ def validate_tx_scripts(
                 message="Cannot spend OP_RETURN output"
             )
 
+        # 서명 해시 계산 (Bitcoin SIGHASH_ALL 방식)
+        sig_hash = tx.get_signature_hash(idx, utxo.output.script_pubkey)
+
         # 스크립트 검증
         if not verify_script(
             script_sig=inp.script_sig,
             script_pubkey=utxo.output.script_pubkey,
-            tx_hash=tx_hash,
+            tx_hash=sig_hash,
             input_index=idx
         ):
             return TxValidationResult(

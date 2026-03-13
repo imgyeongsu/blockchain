@@ -195,6 +195,52 @@ class Transaction:
             self._txid = double_sha256(self.serialize())
         return self._txid
 
+    def get_signature_hash(self, input_index: int, script_pubkey: bytes, sighash_type: int = 1) -> bytes:
+        """
+        서명 해시 계산 (Bitcoin SIGHASH_ALL 방식)
+
+        Args:
+            input_index: 서명할 입력 인덱스
+            script_pubkey: 이전 출력의 scriptPubKey (잠금 스크립트)
+            sighash_type: SIGHASH_ALL = 1 (기본값)
+
+        Returns:
+            서명에 사용할 해시 (32 bytes)
+        """
+        # TX 복사본 생성 (원본 수정 방지)
+        import copy
+        tx_copy = Transaction(
+            version=self.version,
+            inputs=[],
+            outputs=copy.deepcopy(self.outputs),
+            locktime=self.locktime
+        )
+
+        # 모든 입력 복사, script_sig 처리
+        for i, inp in enumerate(self.inputs):
+            if i == input_index:
+                # 서명할 입력: script_sig를 script_pubkey로 설정
+                new_inp = TxInput(
+                    prev_tx_id=inp.prev_tx_id,
+                    output_index=inp.output_index,
+                    script_sig=script_pubkey,  # 이전 출력의 잠금 스크립트
+                    sequence=inp.sequence
+                )
+            else:
+                # 다른 입력: script_sig 비움
+                new_inp = TxInput(
+                    prev_tx_id=inp.prev_tx_id,
+                    output_index=inp.output_index,
+                    script_sig=b'',
+                    sequence=inp.sequence
+                )
+            tx_copy.inputs.append(new_inp)
+
+        # 직렬화 + sighash_type (4 bytes, little-endian)
+        preimage = tx_copy.serialize() + struct.pack('<I', sighash_type)
+
+        return double_sha256(preimage)
+
     def get_txid_hex(self) -> str:
         """TX ID (hex 문자열, 역순)"""
         return self.get_txid()[::-1].hex()
