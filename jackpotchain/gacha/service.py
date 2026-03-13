@@ -446,16 +446,15 @@ class GachaService:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
+        # 서명 (Bitcoin SIGHASH_ALL 방식)
         for i, (inp, utxo) in enumerate(inputs):
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
                 from ..script.standard import create_p2pkh_script_sig
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # PendingCommit 생성
         addresses = wallet.get_addresses()
@@ -568,15 +567,14 @@ class GachaService:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
+        # 서명 (Bitcoin SIGHASH_ALL 방식)
         for i, (inp, utxo) in enumerate(inputs):
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # 이벤트
         self.events.emit(GachaEventData(
@@ -673,15 +671,14 @@ class GachaService:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
+        # 서명 (Bitcoin SIGHASH_ALL 방식)
         for i, (inp, utxo) in enumerate(inputs):
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # 이벤트
         self.events.emit(GachaEventData(
