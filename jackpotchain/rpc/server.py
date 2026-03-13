@@ -120,6 +120,10 @@ class RPCServer:
         self._methods['gachareveal'] = self._lottoclaim
         self._methods['listgachacommits'] = self._listlottocommits
 
+        # Exchange (JACK -> POT)
+        self._methods['exchangetopot'] = self._exchangetopot
+        self._methods['getexchangeinfo'] = self._getexchangeinfo
+
         # Utility
         self._methods['help'] = self._help
 
@@ -692,6 +696,123 @@ class RPCServer:
             })
 
         return result
+
+    # =========================================================================
+    # Exchange Methods (JACK -> POT)
+    # =========================================================================
+
+    def _getexchangeinfo(self) -> dict:
+        """교환 정보 조회"""
+        from ..constants import EXCHANGE_RATE, COIN
+        return {
+            'rate': f'{EXCHANGE_RATE} JACK = 1 POT',
+            'jack_per_pot': EXCHANGE_RATE,
+            'direction': 'JACK -> POT only (one-way)',
+            'min_jack': EXCHANGE_RATE,
+        }
+
+    async def _exchangetopot(self, jack_amount: float) -> dict:
+        """
+        JACK -> POT 교환
+
+        Args:
+            jack_amount: 교환할 JACK 수량
+
+        Returns:
+            {pot_received, jack_burned, tx_id, ...}
+        """
+        if not self.wallet:
+            raise Exception("Wallet not available")
+
+        from ..asset.exchange import calculate_exchange, create_exchange_tx
+        from ..constants import COIN
+
+        jack_satoshi = int(jack_amount * COIN)
+
+        # 교환 계산
+        result = calculate_exchange(jack_satoshi)
+        if not result.success:
+            raise Exception(result.error)
+
+        # UTXO 선택
+        utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
+        current_height = self.blockchain.get_height()
+
+        # Mature UTXO만 선택
+        mature_utxos = [u for u in utxos if u.is_mature(current_height)]
+
+        # 충분한 JACK 수집
+        selected = []
+        total = 0
+        for utxo in mature_utxos:
+            if utxo.output.jack_value > 0:
+                from ..core.transaction import TxInput
+                inp = TxInput(
+                    prev_tx_id=utxo.tx_id,
+                    output_index=utxo.output_index,
+                    script_sig=b'',
+                    sequence=0xFFFFFFFF
+                )
+                selected.append((inp, utxo))
+                total += utxo.output.jack_value
+                if total >= jack_satoshi:
+                    break
+
+        if total < jack_satoshi:
+            raise Exception(f"Insufficient JACK balance: {total / COIN} < {jack_amount}")
+
+        # 주소
+        addresses = self.wallet.get_addresses()
+        recipient = addresses[0] if addresses else ""
+        change_addr = self.wallet.get_change_address()
+
+        # 교환 TX 생성
+        tx, error = create_exchange_tx(
+            inputs=selected,
+            exchange_jack=jack_satoshi,
+            recipient_address=recipient,
+            change_address=change_addr
+        )
+
+        if error:
+            raise Exception(error)
+
+        # 서명
+        from ..crypto.signature import sign
+        from ..script.standard import create_p2pkh_script_sig
+
+        for i, (inp, utxo) in enumerate(selected):
+            # 주소에서 개인키 찾기
+            from ..script.standard import get_address_from_script_pubkey
+            addr = get_address_from_script_pubkey(utxo.output.script_pubkey)
+            if addr and addr in self.wallet._addresses:
+                info = self.wallet._addresses[addr]
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
+
+        # Mempool에 추가
+        success, msg = self.mempool.add_tx(
+            tx,
+            self.blockchain.utxo_set,
+            current_height
+        )
+
+        if not success:
+            raise Exception(f"Failed to add to mempool: {msg}")
+
+        # 네트워크 전파
+        if self.node:
+            await self.node.broadcast_tx(tx)
+
+        return {
+            'success': True,
+            'tx_id': tx.get_txid().hex(),
+            'jack_exchanged': jack_amount,
+            'jack_burned': result.jack_burned / COIN,
+            'pot_received': result.pot_amount / COIN,
+            'jack_change': result.jack_change / COIN,
+        }
 
     # =========================================================================
     # Utility Methods
