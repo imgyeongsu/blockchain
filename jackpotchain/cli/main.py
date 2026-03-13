@@ -124,6 +124,11 @@ def run_node(args):
 
         while True:
             try:
+                # IBD 중이면 채굴 일시 중지
+                if node.is_syncing:
+                    await asyncio.sleep(1)
+                    continue
+
                 # 블록 템플릿 생성
                 txs = mempool.get_txs_for_block()
                 tip = blockchain.get_tip()
