@@ -137,8 +137,15 @@ def get_script_type(script_pubkey: bytes) -> str:
 
 def get_address_from_script_pubkey(script_pubkey: bytes) -> Optional[str]:
     """scriptPubKey에서 주소 추출"""
-    from ..crypto.address import pubkey_hash_to_address
+    from ..crypto.address import pubkey_hash_to_address, JACKPOT_POOL_ADDRESS, BURN_ADDRESS
 
+    # 특수 마커 처리 (제네시스 블록 등)
+    if script_pubkey == b'JACKPOT_POOL':
+        return JACKPOT_POOL_ADDRESS
+    if script_pubkey == b'BURN':
+        return BURN_ADDRESS
+
+    # P2PKH 형식
     pubkey_hash = extract_p2pkh_pubkey_hash(script_pubkey)
     if pubkey_hash:
         return pubkey_hash_to_address(pubkey_hash)
