@@ -176,6 +176,9 @@ def run_node(args):
                     # 체인에 추가 (UTXO 자동 적용됨)
                     success, msg = blockchain.add_block(result.block)
                     if success:
+                        # Mempool에서 포함된 TX 제거
+                        for tx in result.block.transactions[1:]:  # coinbase 제외
+                            mempool.remove_tx(tx.get_txid())
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
                         print(f"[Miner] Block added and broadcasted. New height: {blockchain.get_height()}")
