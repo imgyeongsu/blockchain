@@ -363,8 +363,8 @@ class ScriptInterpreter:
             else:
                 actual_sig = sig
 
-            # 서명 검증
-            return verify(pubkey, self.context.tx_hash, actual_sig)
+            # 서명 검증 (message_hash, signature, public_key 순서)
+            return verify(self.context.tx_hash, actual_sig, pubkey)
         except Exception:
             return False
 
