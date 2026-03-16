@@ -129,6 +129,16 @@ class RPCClient:
         """채굴 정보"""
         return await self.call("getmininginfo")
 
+    async def start_mining(self, address: str = None) -> RPCResponse:
+        """채굴 시작"""
+        if address:
+            return await self.call("startmining", address)
+        return await self.call("startmining")
+
+    async def stop_mining(self) -> RPCResponse:
+        """채굴 중지"""
+        return await self.call("stopmining")
+
     # =========================================================================
     # Mempool
     # =========================================================================

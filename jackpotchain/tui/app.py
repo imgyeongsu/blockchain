@@ -108,6 +108,13 @@ class JackpotChainApp(App):
             else:
                 menu_item.remove_class("active")
 
+    def on_click(self, event) -> None:
+        """메뉴 클릭 처리"""
+        widget_id = event.widget.id
+        if widget_id and widget_id.startswith("menu-"):
+            tab_name = widget_id.replace("menu-", "")
+            self.action_show_tab(tab_name)
+
     def action_refresh(self) -> None:
         """현재 탭 새로고침"""
         current = self.query_one(f"#{self._current_tab}")

@@ -49,12 +49,22 @@ class ClaimsWidget(ScrollableContainer):
     async def _load_data(self) -> None:
         """비동기 데이터 로드"""
         resp = await self.rpc.list_lotto_commits()
+
         if resp.success:
             commits = resp.result or []
-            table = self.query_one("#commits-table", DataTable)
-            table.clear()
+        else:
+            commits = []
+            # # 더미 데이터 (UI 테스트용)
+            # commits = [
+            #     {"chosen_hex": ["A", "3", "F", "7", "2", "B"], "commit_height": 128, "status": "claimable", "blocks_until_claimable": 0},
+            #     {"chosen_hex": ["1", "C", "5", "9", "E", "0"], "commit_height": 135, "status": "pending", "blocks_until_claimable": 12},
+            #     {"chosen_hex": ["D", "8", "4", "6", "A", "2"], "commit_height": 142, "status": "pending_mine", "blocks_until_claimable": 18},
+            # ]
 
-            for c in commits:
+        table = self.query_one("#commits-table", DataTable)
+        table.clear()
+
+        for c in commits:
                 nums = c.get("chosen_hex", c.get("chosen_numbers", []))
                 if nums and isinstance(nums[0], int):
                     num_str = " ".join(f"{n:X}" for n in nums)

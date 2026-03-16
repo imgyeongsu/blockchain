@@ -5,7 +5,7 @@ Lotto Widget
 """
 
 from textual.app import ComposeResult
-from textual.widgets import Static, Label, Input, Button
+from textual.widgets import Label, Input, Button
 from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
@@ -57,7 +57,7 @@ class LottoWidget(ScrollableContainer):
         yield Label("", id="lotto-status", classes="status-msg")
 
         # 안내
-        yield Label("Commits are shown in F6 Claims tab", classes="info-text")
+        yield Label("Commits are shown in F5 Claims tab", classes="info-text")
 
     def on_mount(self) -> None:
         """마운트 시"""
@@ -78,6 +78,16 @@ class LottoWidget(ScrollableContainer):
             prize = data.get("next_jackpot", 0)
             self.query_one("#l-jackpot-amount", Label).update(f"{pool:,.0f} JACK")
             self.query_one("#first-prize", Label).update(f"1st: {prize:,.0f} JACK")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """입력 변경 시 유효성 검사 + 대문자 변환"""
+        if event.input.id and event.input.id.startswith("num-"):
+            # 유효한 16진수만 필터링 (0-9, A-F)
+            filtered = "".join(c for c in event.value.upper() if c in "0123456789ABCDEF")
+            # 1자리만 허용
+            filtered = filtered[:1]
+            if filtered != event.value:
+                event.input.value = filtered
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """버튼 클릭 처리"""

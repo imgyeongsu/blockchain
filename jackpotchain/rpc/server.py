@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from aiohttp import web
 
 from ..consensus.chain import Blockchain
-from ..consensus.difficulty import difficulty_to_hashrate
+from ..consensus.difficulty import difficulty_to_hashrate, get_next_difficulty
+from ..consensus.miner import create_block_template, mine_block
 from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
@@ -82,6 +83,16 @@ class RPCServer:
         self._app = web.Application()
         self._app.router.add_post('/', self._handle_request)
 
+        # 채굴 상태
+        self._mining = False
+        self._mining_address: Optional[str] = None
+        self._mining_task: Optional[asyncio.Task] = None
+        self._mining_stats = {
+            'blocks_mined': 0,
+            'total_hashes': 0,
+            'hashrate': 0.0,
+        }
+
         # 메서드 등록
         self._methods: Dict[str, Callable] = {}
         self._register_methods()
@@ -112,6 +123,8 @@ class RPCServer:
 
         # Mining
         self._methods['getmininginfo'] = self._getmininginfo
+        self._methods['startmining'] = self._startmining
+        self._methods['stopmining'] = self._stopmining
 
         # Lotto (16-2 Final)
         self._methods['getlottoinfo'] = self._getlottoinfo
@@ -372,12 +385,15 @@ class RPCServer:
         if not self.wallet:
             raise Exception("Wallet not available")
 
+        from ..script.standard import get_address_from_script_pubkey
+
         utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
         current_height = self.blockchain.get_height()
         return [
             {
                 'txid': utxo.tx_id.hex(),
                 'vout': utxo.output_index,
+                'address': get_address_from_script_pubkey(utxo.output.script_pubkey),
                 'amount': utxo.output.jack_value / 100_000_000,
                 'assets': utxo.output.assets,
                 'confirmations': max(0, current_height - utxo.block_height + 1),
@@ -465,7 +481,119 @@ class RPCServer:
             'difficulty': difficulty,
             'networkhashps': difficulty_to_hashrate(difficulty),
             'pooledtx': self.mempool.get_stats()['count'],
+            'mining': self._mining,
+            'mining_address': self._mining_address,
+            'blocks_mined': self._mining_stats['blocks_mined'],
+            'hashrate': self._mining_stats['hashrate'],
         }
+
+    def _startmining(self, address: str = None) -> dict:
+        """채굴 시작"""
+        if self._mining:
+            return {'success': False, 'error': 'Already mining'}
+
+        # 주소 결정
+        if address:
+            self._mining_address = address
+        elif self.wallet:
+            addresses = self.wallet.get_addresses()
+            if addresses:
+                self._mining_address = addresses[0]
+            else:
+                self._mining_address = self.wallet.generate_address()
+        else:
+            return {'success': False, 'error': 'No mining address provided'}
+
+        self._mining = True
+        self._mining_task = asyncio.create_task(self._mining_loop())
+
+        return {
+            'success': True,
+            'message': f'Mining started',
+            'address': self._mining_address
+        }
+
+    def _stopmining(self) -> dict:
+        """채굴 중지"""
+        if not self._mining:
+            return {'success': False, 'error': 'Not mining'}
+
+        self._mining = False
+        if self._mining_task:
+            self._mining_task.cancel()
+            self._mining_task = None
+
+        return {
+            'success': True,
+            'message': 'Mining stopped',
+            'blocks_mined': self._mining_stats['blocks_mined']
+        }
+
+    async def _mining_loop(self):
+        """채굴 루프"""
+        print(f"[Miner] Started mining to {self._mining_address}")
+
+        while self._mining:
+            try:
+                # IBD 중이면 대기
+                if self.node and self.node.is_syncing:
+                    await asyncio.sleep(1)
+                    continue
+
+                # 블록 템플릿 생성
+                txs = self.mempool.get_txs_for_block()
+                tip = self.blockchain.get_tip()
+                difficulty = get_next_difficulty(
+                    self.blockchain.get_height(),
+                    self.blockchain.get_block_by_height
+                )
+
+                template = create_block_template(
+                    prev_block=tip,
+                    miner_address=self._mining_address,
+                    transactions=txs,
+                    difficulty_target=difficulty
+                )
+
+                # 비동기 채굴 (블로킹 방지)
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: mine_block(template, max_nonce=500_000)
+                )
+
+                self._mining_stats['total_hashes'] += result.hash_count
+                if result.elapsed_time > 0:
+                    self._mining_stats['hashrate'] = result.hash_count / result.elapsed_time
+
+                if result.success:
+                    self._mining_stats['blocks_mined'] += 1
+
+                    # 블록 추가
+                    success, msg = self.blockchain.add_block(result.block)
+                    if success:
+                        print(f"[Miner] Block {self.blockchain.get_height()} mined!")
+
+                        # mempool에서 TX 제거
+                        for tx in result.block.transactions[1:]:
+                            self.mempool.remove_tx(tx.get_txid())
+
+                        # 네트워크 전파
+                        if self.node:
+                            asyncio.create_task(
+                                self.node.broadcast_block(result.block)
+                            )
+                    else:
+                        print(f"[Miner] Block rejected: {msg}")
+
+                await asyncio.sleep(0.1)  # CPU 과부하 방지
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"[Miner] Error: {e}")
+                await asyncio.sleep(1)
+
+        print("[Miner] Mining stopped")
 
     # =========================================================================
     # Lotto Methods (16-2 Final)

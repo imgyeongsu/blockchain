@@ -57,7 +57,7 @@ class WalletWidget(ScrollableContainer):
             Horizontal(
                 Button("[S] Send", id="btn-send-modal", variant="success", classes="action-btn"),
                 Button("[E] Exchange", id="btn-exchange-modal", variant="warning", classes="action-btn"),
-                Button("[R] Receive", id="btn-receive", variant="primary", classes="action-btn"),
+                Button("[N] New Address", id="btn-receive", variant="primary", classes="action-btn"),
                 classes="action-row",
             ),
             classes="stat-box",
