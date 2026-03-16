@@ -413,10 +413,10 @@ class GachaService:
         # 출력 생성
         outputs = []
 
-        # 1. Commit OP_RETURN (숫자 배열 포함)
+        # 1. Commit OP_RETURN (해시만 - 숫자는 로컬 저장)
         outputs.append(TxOutput(
             jack_value=0,
-            script_pubkey=create_commit_script(commit_hash, actual_numbers)
+            script_pubkey=create_commit_script(commit_hash)
         ))
 
         # 2. POT 잔돈
@@ -469,6 +469,7 @@ class GachaService:
             chosen_numbers=actual_numbers,
             address=player_address,
             created_at=time.time(),
+            tx_id=tx.get_txid(),
             pool_snapshot=pool_snapshot,
             gacha_type=gacha_type
         )

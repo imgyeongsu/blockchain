@@ -490,7 +490,8 @@ class LottoGame:
         self,
         commit_hash: bytes,
         chosen_numbers: List[int],
-        current_height: int
+        current_height: int,
+        commit_height: int = 0
     ) -> Optional[LottoPlayResult]:
         """
         결과 미리보기 (Claim 전)
@@ -499,6 +500,7 @@ class LottoGame:
             commit_hash: Commit 해시
             chosen_numbers: 사용자가 로컬에 저장한 6자리 숫자
             current_height: 현재 블록 높이
+            commit_height: Commit 블록 높이 (없으면 store에서 조회)
 
         Returns:
             LottoPlayResult (Claim 안 해도 결과 확인 가능)
@@ -506,16 +508,19 @@ class LottoGame:
         Note:
             숫자는 Commit에 포함되지 않으므로 사용자가 제공해야 함
         """
-        commit = self.store.get_commit(commit_hash)
-        if commit is None:
-            return None
+        # commit_height가 제공되지 않으면 store에서 조회
+        if commit_height == 0:
+            commit = self.store.get_commit(commit_hash)
+            if commit is None:
+                return None
+            commit_height = commit.commit_height
 
         # 숫자 유효성 검사
         if len(chosen_numbers) != LOTTO_DIGIT_COUNT:
             return LottoPlayResult(success=False, error="Invalid chosen_numbers length")
 
         # 비교 블록이 모두 생성되었는지 확인
-        comparison_heights = get_comparison_heights(commit.commit_height)
+        comparison_heights = get_comparison_heights(commit_height)
         if current_height < comparison_heights[-1]:
             return LottoPlayResult(
                 success=False,
@@ -542,11 +547,13 @@ class LottoGame:
         payout_jack = 0
         payout_pot = 0
         if prize == LottoPrize.JACKPOT:
-            payout_jack = self.pool.calculate_jackpot_payout(commit.commit_height)
+            payout_jack = self.pool.calculate_jackpot_payout(commit_height)
         elif prize == LottoPrize.SIXTH:
             payout_pot = LOTTO_PRIZE_6TH_POT
         elif prize != LottoPrize.NONE:
-            payout_jack = calculate_payout(prize, commit.pool_snapshot)
+            # pool_snapshot 없으면 현재 풀 잔액 사용
+            pool_snapshot = self.pool.balance
+            payout_jack = calculate_payout(prize, pool_snapshot)
 
         return LottoPlayResult(
             success=True,

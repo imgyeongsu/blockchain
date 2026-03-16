@@ -69,6 +69,13 @@ class RPCServer:
         self.gacha = gacha or GachaGame()
         self.gacha_service = gacha_service or create_gacha_service(data_dir=data_dir)
 
+        # 블록 해시 조회 콜백 설정
+        def get_block_hash(height: int) -> bytes:
+            block = blockchain.get_block_by_height(height)
+            return block.get_hash() if block else None
+
+        self.gacha.set_block_hash_getter(get_block_hash)
+
         self.host = host
         self.port = port
 
@@ -574,8 +581,18 @@ class RPCServer:
         commit_hash_bytes = bytes.fromhex(commit_hash)
         current_height = self.blockchain.get_height()
 
+        # 대응하는 PendingCommit 찾기
+        pending = self.gacha_service._find_pending_commit(commit_hash_bytes)
+        if not pending:
+            raise Exception("Pending commit not found")
+
         # 결과 미리 확인
-        preview = self.gacha.check_result(commit_hash_bytes, current_height)
+        preview = self.gacha.check_result(
+            commit_hash_bytes,
+            pending.chosen_numbers,
+            current_height,
+            commit_height=pending.block_height
+        )
         if preview and not preview.success:
             raise Exception(preview.error)
 
@@ -633,10 +650,20 @@ class RPCServer:
         commit_hash_bytes = bytes.fromhex(commit_hash)
         current_height = self.blockchain.get_height()
 
-        result = self.gacha.check_result(commit_hash_bytes, current_height)
+        # 대응하는 PendingCommit 찾기
+        pending = self.gacha_service._find_pending_commit(commit_hash_bytes)
+        if not pending:
+            raise Exception("Pending commit not found")
+
+        result = self.gacha.check_result(
+            commit_hash_bytes,
+            pending.chosen_numbers,
+            current_height,
+            commit_height=pending.block_height
+        )
 
         if result is None:
-            raise Exception("Commit not found")
+            raise Exception("Could not check result")
 
         if not result.success:
             return {
@@ -669,30 +696,61 @@ class RPCServer:
         Returns:
             [{commit_hash, chosen_numbers, status, ...}, ...]
         """
-        commits = self.gacha.get_pending_commits(address, self.blockchain.get_height())
+        # GachaService의 pending commits 사용 (RPC로 생성된 commits)
+        pending_commits = self.gacha_service.get_pending_commits(address)
         current_height = self.blockchain.get_height()
 
-        from ..gacha.commit_reveal import get_commit_status, get_comparison_heights
+        from ..gacha.commit_reveal import get_comparison_heights
+
+        # mempool 확인하여 block_height 자동 업데이트
+        mempool_txs = set(self.mempool._entries.keys()) if self.mempool else set()
 
         result = []
-        for c in commits:
-            comparison_heights = get_comparison_heights(c.commit_height)
-            status = get_commit_status(c, current_height)
+        for c in pending_commits:
+            # TX가 mempool에 없고 block_height가 0이면 채굴된 것
+            tx_id = c.tx_id if hasattr(c, 'tx_id') and c.tx_id else None
+            if tx_id and c.block_height == 0 and tx_id not in mempool_txs:
+                # 대략적인 채굴 시점 추정 (현재 높이 - 1)
+                estimated_height = current_height - 1
+                self.gacha_service.update_commit_status(c.commit_hash, tx_id, estimated_height)
+                c.block_height = estimated_height
+            # block_height가 0이면 아직 채굴 안됨
+            commit_height = c.block_height if c.block_height > 0 else current_height
+            comparison_heights = get_comparison_heights(commit_height)
+
+            # 상태 계산
+            if c.block_height == 0:
+                status = "pending_mine"
+                can_claim = False
+                blocks_until_claimable = 18
+            else:
+                gap = current_height - c.block_height
+                if gap < 18:
+                    status = "pending"
+                    can_claim = False
+                    blocks_until_claimable = 18 - gap
+                elif gap <= 80:
+                    status = "claimable"
+                    can_claim = True
+                    blocks_until_claimable = 0
+                else:
+                    status = "expired"
+                    can_claim = False
+                    blocks_until_claimable = 0
 
             result.append({
                 'commit_hash': c.commit_hash.hex(),
                 'chosen_numbers': c.chosen_numbers,
                 'chosen_hex': [hex(n) for n in c.chosen_numbers] if c.chosen_numbers else [],
-                'player_address': c.player_address,
-                'commit_height': c.commit_height,
-                'tx_id': c.commit_tx_id.hex() if c.commit_tx_id else '',
-                'pool_snapshot': c.pool_snapshot / 100_000_000,
-                'status': status.value,
-                'can_claim': status.value == 'claimable',
+                'player_address': c.address,
+                'commit_height': c.block_height,
+                'pool_snapshot': c.pool_snapshot / 100_000_000 if c.pool_snapshot else 0,
+                'status': status,
+                'can_claim': can_claim,
                 'comparison_blocks': comparison_heights,
-                'claim_deadline': c.commit_height + 80,
-                'blocks_until_claimable': max(0, (c.commit_height + 30) - current_height),
-                'blocks_until_expire': max(0, (c.commit_height + 80) - current_height),
+                'claim_deadline': commit_height + 80,
+                'blocks_until_claimable': blocks_until_claimable,
+                'blocks_until_expire': max(0, (commit_height + 80) - current_height),
             })
 
         return result
