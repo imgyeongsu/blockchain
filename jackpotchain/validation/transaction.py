@@ -137,6 +137,11 @@ def validate_tx_structure(tx: Transaction) -> TxValidationResult:
     return TxValidationResult(is_valid=True)
 
 
+def is_jackpot_pool_script(script: bytes) -> bool:
+    """잭팟 풀 특수 스크립트인지 확인"""
+    return script == b'JACKPOT_POOL'
+
+
 def validate_tx_scripts(
     tx: Transaction,
     utxo_set: UTXOSet,
@@ -149,6 +154,7 @@ def validate_tx_scripts(
     - 입력 UTXO 존재
     - Coinbase 성숙도
     - 서명 유효성
+    - LOTTO_CLAIM TX는 잭팟 풀에서 서명 없이 지출 허용
     """
     if tx.is_coinbase():
         return TxValidationResult(is_valid=True)
@@ -178,6 +184,18 @@ def validate_tx_scripts(
                 error=TxValidationError.INVALID_SCRIPT,
                 message="Cannot spend OP_RETURN output"
             )
+
+        # 잭팟 풀 UTXO는 LOTTO_CLAIM TX에서만 서명 없이 지출 허용
+        if is_jackpot_pool_script(utxo.output.script_pubkey):
+            if tx.version == TX_VERSION_LOTTO_CLAIM:
+                # TODO: claim 데이터 검증 (commit_hash, nonce, numbers)
+                continue  # 서명 검증 스킵
+            else:
+                return TxValidationResult(
+                    is_valid=False,
+                    error=TxValidationError.INVALID_SCRIPT,
+                    message="Jackpot pool can only be spent by LOTTO_CLAIM TX"
+                )
 
         # 서명 해시 계산 (Bitcoin SIGHASH_ALL 방식)
         sig_hash = tx.get_signature_hash(idx, utxo.output.script_pubkey)

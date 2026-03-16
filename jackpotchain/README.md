@@ -129,7 +129,42 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 3. 다중 노드 장기 동기화 및 fork 회복 시나리오 테스트
 4. 16.1 문서의 고도화된 치트억제 로깅/모니터링
 
-## 7. 문서 운영 원칙
+## 7. 업그레이드 예정 사항
+
+### 7.1 잭팟 풀 보안 강화 (P1)
+**현재 상태**: 잭팟 풀 UTXO는 `b'JACKPOT_POOL'` 특수 스크립트 사용, LOTTO_CLAIM TX에서 서명 없이 지출 허용
+
+**문제점**:
+- 서명 없이 풀 UTXO 지출 가능 (악의적 노드가 가짜 claim 생성 가능)
+- claim 데이터 검증이 TX 검증 단계에서 수행되지 않음
+
+**개선 방안**:
+1. **시스템 키페어 도입**: 잭팟 풀 전용 하드코딩 키페어 생성, 표준 P2PKH 서명 사용
+2. **Claim 검증 강화**: TX 검증 시 commit_hash, nonce, numbers 정합성 체크
+3. **Multi-sig 풀**: 여러 검증자 서명 필요 (탈중앙화)
+
+**관련 파일**:
+- `validation/transaction.py`: `is_jackpot_pool_script()`, claim 검증 TODO
+- `gacha/service.py`: `_select_pool_utxos()`, 풀 서명 스킵 로직
+- `crypto/address.py`: `JACKPOT_POOL_ADDRESS`
+
+### 7.2 Claim 데이터 온체인 검증 (P1)
+**현재 상태**: Claim TX의 OP_RETURN에 commit_hash, nonce, numbers 포함되나 검증 안 함
+
+**개선 방안**:
+- `validate_tx_scripts()`에서 LOTTO_CLAIM TX일 때 claim 데이터 파싱
+- commit_hash가 실제 commit TX에 존재하는지 확인
+- numbers + nonce로 commit_hash 재계산하여 일치 확인
+- 비교 블록 해시로 결과 계산, payout 금액 검증
+
+### 7.3 POT 6등 보상 UTXO 처리 (P2)
+**현재 상태**: 6등(1 POT 재지급) 로직은 TX output에 포함되나 POT 발행 소스 미정
+
+**개선 방안**:
+- POT 전용 발행 풀 또는 시스템 mint 권한 정의
+- 또는 참가비 POT를 별도 풀에 적립 후 6등에게 지급
+
+## 8. 문서 운영 원칙
 - 이 README를 SSOT로 사용합니다.
 - `DEVELOPMENT_STATUS.md`는 상태 리포트 문서로 유지하되, 사실 기준은 코드 + README입니다.
 - 로드맵 문서와 구현이 다르면, 반드시 README의 "차이" 섹션에 먼저 기록합니다.

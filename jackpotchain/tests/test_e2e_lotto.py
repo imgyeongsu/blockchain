@@ -43,14 +43,13 @@ class TestLottoE2E:
 
         # 가챠 서비스
         gacha_service = create_gacha_service(data_dir=str(tmp_path))
-        gacha_game = LottoGame()
 
-        # 블록 해시 조회 콜백 설정
+        # 블록 해시 조회 콜백 설정 (service.game에 설정)
         def get_block_hash(height: int) -> bytes:
             block = blockchain.get_block_by_height(height)
             return block.get_hash() if block else None
 
-        gacha_game.set_block_hash_getter(get_block_hash)
+        gacha_service.game.set_block_hash_getter(get_block_hash)
 
         return {
             'blockchain': blockchain,
@@ -58,7 +57,7 @@ class TestLottoE2E:
             'wallet': wallet,
             'miner_address': miner_address,
             'gacha_service': gacha_service,
-            'gacha_game': gacha_game,
+            'gacha_game': gacha_service.game,  # service의 game 사용
         }
 
     def do_exchange(self, env, jack_amount: int) -> Transaction:
@@ -308,6 +307,14 @@ class TestLottoE2E:
         print(f"  결과 숫자: {result.result_digits}")
         print(f"  매칭: {result.matches}개")
         print(f"  등수: {result.prize.name}")
+        print(f"  예상 JACK 보상: {result.payout_jack // COIN} JACK")
+        print(f"  예상 POT 보상: {result.payout_pot // COIN} POT")
+
+        # Claim 전 잔액 기록
+        utxos_before = blockchain.utxo_set.get_utxos_for_address(miner_address)
+        jack_before = sum(u.output.jack_value for u in utxos_before)
+        pool_utxos_before = blockchain.utxo_set.get_pool_utxos()
+        pool_before = sum(u.output.jack_value for u in pool_utxos_before)
 
         # 7. Claim TX 생성
         claim_tx, claim_error = gacha_service.create_claim(
@@ -327,6 +334,26 @@ class TestLottoE2E:
         mined = self.mine_blocks(env, 1)
         assert len(mined) == 1
         assert mined[0].get_txid() == claim_tx.get_txid()
+
+        # 9. 당첨금 지급 검증
+        utxos_after = blockchain.utxo_set.get_utxos_for_address(miner_address)
+        jack_after = sum(u.output.jack_value for u in utxos_after)
+        pool_utxos_after = blockchain.utxo_set.get_pool_utxos()
+        pool_after = sum(u.output.jack_value for u in pool_utxos_after)
+
+        # 당첨금이 있으면 검증
+        if result.payout_jack > 0:
+            # 사용자 잔액 증가 확인 (coinbase 보상 포함이라 정확히 payout_jack는 아님)
+            print(f"  사용자 JACK 변화: {jack_before // COIN} -> {jack_after // COIN}")
+            print(f"  풀 JACK 변화: {pool_before // COIN} -> {pool_after // COIN}")
+
+            # 풀 잔액 감소 확인
+            assert pool_after < pool_before, "Pool balance should decrease after payout"
+            pool_decrease = pool_before - pool_after
+            assert pool_decrease == result.payout_jack, \
+                f"Pool decrease {pool_decrease} != payout {result.payout_jack}"
+        else:
+            print(f"  당첨 없음 (매칭 {result.matches}개)")
 
         print(f"[PASS] Lotto flow test!")
         print(f"  Commit height: {commit_height}")
