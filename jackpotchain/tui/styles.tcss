@@ -264,13 +264,34 @@ DataTable > .datatable--header {
 }
 
 /* Input 스타일 */
-.lotto-input {
-    width: 6;
+Input {
+    background: #222222;
+    border: solid #444444;
+}
+
+Input > .input--cursor {
+    color: white;
+    background: white;
+}
+
+Input:focus {
+    border: solid $primary;
+}
+
+/* 로또 번호 입력 - ID 셀렉터로 직접 지정 */
+#num-0, #num-1, #num-2, #num-3, #num-4, #num-5 {
+    width: 8;
+    height: 3;
     margin-right: 1;
-    text-align: center;
-    color: $warning;
     background: #1a1a1a;
-    border: solid $warning;
+    color: #ffbd2e;
+    border: solid #ffbd2e;
+    text-align: center;
+}
+
+#num-0:focus, #num-1:focus, #num-2:focus, #num-3:focus, #num-4:focus, #num-5:focus {
+    border: solid #00ff88;
+    background: #2a2a2a;
 }
 
 /* 로또 번호 박스 */

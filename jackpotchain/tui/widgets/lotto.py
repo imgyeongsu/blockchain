@@ -14,6 +14,8 @@ from ..client import RPCClient
 class LottoWidget(ScrollableContainer):
     """로또 위젯"""
 
+    can_focus = False
+
     def __init__(self, rpc: RPCClient, **kwargs):
         super().__init__(**kwargs)
         self.rpc = rpc

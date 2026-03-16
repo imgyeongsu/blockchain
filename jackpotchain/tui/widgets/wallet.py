@@ -15,6 +15,8 @@ from ...crypto.address import validate_address
 class WalletWidget(ScrollableContainer):
     """지갑 위젯"""
 
+    can_focus = False
+
     def __init__(self, rpc: RPCClient, **kwargs):
         super().__init__(**kwargs)
         self.rpc = rpc
