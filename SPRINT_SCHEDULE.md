@@ -6,13 +6,13 @@
 
 ## 역할 분담
 
-| 역할 | 담당 모듈 | 예상 라인 |
-|:----:|----------|:---------:|
-| **A** (Core) | 상수, 암호화, 자료구조 | ~1,200 |
-| **B** (Consensus) | 합의, 검증 | ~1,100 |
-| **C** (Network) | P2P 네트워크 | ~3,400 |
-| **D** (Application) | 로또, 지갑, 스크립트 | ~2,800 |
-| **E** (Infra) | CLI, RPC, 저장소, 테스트 | ~1,500 |
+| 역할 | 담당자 | 담당 모듈 | 예상 라인 |
+|:----:|:------:|----------|:---------:|
+| **A** (Core) | **임경수** | 상수, 암호화, 자료구조 | ~1,200 |
+| **B** (Consensus) | **양한빈** | 합의, 검증 | ~1,100 |
+| **C** (Network) | **이동휘** | P2P 네트워크 | ~3,400 |
+| **D** (Application) | **이민수** | 로또, 지갑, 스크립트 | ~2,800 |
+| **E** (Infra) | **장주윤** | CLI, RPC, 저장소, 테스트 | ~1,500 |
 
 ---
 
@@ -20,23 +20,23 @@
 
 ### 오전 (09:00 ~ 12:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | 상수 정의 + 해시/서명 | `constants.py`, `crypto/hash.py`, `crypto/signature.py` |
-| B | 난이도 조정 알고리즘 | `consensus/difficulty.py` |
-| C | 피어 구조체 + 프로토콜 메시지 | `network/peer.py`, `network/protocol.py` |
-| D | 스크립트 opcode + 표준 스크립트 | `script/opcodes.py`, `script/standard.py` |
-| E | 프로젝트 셋업 + DB | `__init__.py`, `setup.py`, `storage/database.py` |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | 상수 정의 + 해시/서명 | `constants.py`, `crypto/hash.py`, `crypto/signature.py` |
+| B | 양한빈 | 난이도 조정 알고리즘 | `consensus/difficulty.py` |
+| C | 이동휘 | 피어 구조체 + 프로토콜 메시지 | `network/peer.py`, `network/protocol.py` |
+| D | 이민수 |스크립트 opcode + 표준 스크립트 | `script/opcodes.py`, `script/standard.py` |
+| E | 장주윤 | 프로젝트 셋업 + DB | `__init__.py`, `setup.py`, `storage/database.py` |
 
 ### 오후 (13:00 ~ 18:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | 주소 생성 + 머클트리 + 트랜잭션 | `crypto/address.py`, `crypto/merkle.py`, `core/transaction.py` |
-| B | 채굴기 구현 | `consensus/miner.py` |
-| C | 피어 발견 (DNS/하드코딩) | `network/discovery.py` |
-| D | 스크립트 인터프리터 + 지갑 | `script/interpreter.py`, `wallet/wallet.py` |
-| E | 멤풀 구현 | `mempool/pool.py` |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | 주소 생성 + 머클트리 + 트랜잭션 | `crypto/address.py`, `crypto/merkle.py`, `core/transaction.py` |
+| B | 양한빈 | 채굴기 구현 | `consensus/miner.py` |
+| C | 이동휘 | 피어 발견 (DNS/하드코딩) | `network/discovery.py` |
+| D | 이민수 |스크립트 인터프리터 + 지갑 | `script/interpreter.py`, `wallet/wallet.py` |
+| E | 장주윤 | 멤풀 구현 | `mempool/pool.py` |
 
 ---
 
@@ -44,23 +44,23 @@
 
 ### 오전 (09:00 ~ 12:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | 블록 구조체 + UTXO | `core/block.py`, `core/utxo.py` |
-| B | TX 검증 + 블록 검증 | `validation/transaction.py`, `validation/block.py` |
-| C | NAT Traversal (PCP/NAT-PMP/UPnP) | `network/nat.py` |
-| D | 자산 관리 + 교환 | `asset/manager.py`, `asset/exchange.py` |
-| E | RPC 서버 (절반) | `rpc/server.py` (1/2) |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | 블록 구조체 + UTXO | `core/block.py`, `core/utxo.py` |
+| B | 양한빈 | TX 검증 + 블록 검증 | `validation/transaction.py`, `validation/block.py` |
+| C | 이동휘 | NAT Traversal (PCP/NAT-PMP/UPnP) | `network/nat.py` |
+| D | 이민수 |자산 관리 + 교환 | `asset/manager.py`, `asset/exchange.py` |
+| E | 장주윤 | RPC 서버 (절반) | `rpc/server.py` (1/2) |
 
 ### 오후 (13:00 ~ 18:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | 코드 리뷰 + 버그 수정 | - |
-| B | 블록체인 + Reorg 처리 | `consensus/chain.py` |
-| C | P2P 노드 (메시지 핸들링) | `network/node.py` |
-| D | Commit-Reveal + 잭팟 풀 | `gacha/commit_reveal.py`, `gacha/pool.py` |
-| E | RPC 서버 (완료) + CLI (절반) | `rpc/server.py` (2/2), `cli/main.py` (1/2) |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | 코드 리뷰 + 버그 수정 | - |
+| B | 양한빈 | 블록체인 + Reorg 처리 | `consensus/chain.py` |
+| C | 이동휘 | P2P 노드 (메시지 핸들링) | `network/node.py` |
+| D | 이민수 |Commit-Reveal + 잭팟 풀 | `gacha/commit_reveal.py`, `gacha/pool.py` |
+| E | 장주윤 | RPC 서버 (완료) + CLI (절반) | `rpc/server.py` (2/2), `cli/main.py` (1/2) |
 
 ---
 
@@ -68,23 +68,23 @@
 
 ### 오전 (09:00 ~ 12:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | README + 기술 문서 | `README.md`, `tech.md` |
-| B | 합의 문서화 | 문서 작업 |
-| C | TCP 홀펀칭 + 동기화 매니저 | `network/holepunch.py`, `sync/manager.py` |
-| D | 로또 게임 로직 | `gacha/game.py` |
-| E | CLI 완료 + 단위 테스트 | `cli/main.py` (2/2), `tests/test_core.py` |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | README + 기술 문서 | `README.md`, `tech.md` |
+| B | 양한빈 | 합의 문서화 | 문서 작업 |
+| C | 이동휘 | TCP 홀펀칭 + 동기화 매니저 | `network/holepunch.py`, `sync/manager.py` |
+| D | 이민수 |로또 게임 로직 | `gacha/game.py` |
+| E | 장주윤 | CLI 완료 + 단위 테스트 | `cli/main.py` (2/2), `tests/test_core.py` |
 
 ### 오후 (13:00 ~ 18:00)
 
-| 담당 | 작업 내용 | 파일 |
-|:----:|----------|------|
-| A | 통합 테스트 지원 | - |
-| B | 통합 테스트 지원 | - |
-| C | 멀티노드 네트워크 테스트 | `scripts/test_multinode.py` |
-| D | 로또 서비스 (전체 흐름) | `gacha/service.py` |
-| E | 전체 테스트 + 배포 준비 | `tests/*`, Docker |
+| 담당 | 담당자 | 작업 내용 | 파일 |
+|:----:|:------:|----------|------|
+| A | 임경수 | 통합 테스트 지원 | - |
+| B | 양한빈 | 통합 테스트 지원 | - |
+| C | 이동휘 | 멀티노드 네트워크 테스트 | `scripts/test_multinode.py` |
+| D | 이민수 |로또 서비스 (전체 흐름) | `gacha/service.py` |
+| E | 장주윤 | 전체 테스트 + 배포 준비 | `tests/*`, Docker |
 
 ---
 
@@ -895,8 +895,8 @@ test: [consensus] Reorg UTXO 테스트
 
 | 이슈 | 담당 |
 |------|:----:|
-| 트랜잭션/블록 오류 | A |
-| 합의/검증 실패 | B |
-| 연결/동기화 문제 | C |
-| 로또/지갑 버그 | D |
-| 테스트/배포 이슈 | E |
+| 트랜잭션/블록 오류 | 임경수 (A) |
+| 합의/검증 실패 | 양한빈 (B) |
+| 연결/동기화 문제 | 이동휘 (C) |
+| 로또/지갑 버그 | 이민수 (D) |
+| 테스트/배포 이슈 | 장주윤 (E) |
