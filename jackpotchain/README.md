@@ -86,7 +86,7 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 
 현재 구현 (`jackpotchain/gacha/*`, `constants.py`):
 - Commit: 6자리 hex 숫자 배열 [0x0~0xf] 선택
-- Claim: N+18 ~ N+80 블록 내 결과 확정
+- Claim: N+18 ~ N+68 블록 내 결과 확정
 - 비교 블록: N+3, N+6, N+9, N+12, N+15, N+18 해시 마지막 자리
 - TX 버전: Commit=3, Claim=5
 
@@ -98,7 +98,7 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 | 3등 | 4개 | 20,000 JACK |
 | 4등 | 3개 | 2,000 JACK |
 | 5등 | 2개 | 300 JACK |
-| 6등 | 1개 | 1 POT 재지급 |
+| 6등 | 1개 | 100 JACK (참가비 환불) |
 | 꽝 | 0개 | 없음 |
 
 참가비 분배:
@@ -157,12 +157,10 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 - numbers + nonce로 commit_hash 재계산하여 일치 확인
 - 비교 블록 해시로 결과 계산, payout 금액 검증
 
-### 7.3 POT 6등 보상 UTXO 처리 (P2)
-**현재 상태**: 6등(1 POT 재지급) 로직은 TX output에 포함되나 POT 발행 소스 미정
-
-**개선 방안**:
-- POT 전용 발행 풀 또는 시스템 mint 권한 정의
-- 또는 참가비 POT를 별도 풀에 적립 후 6등에게 지급
+### 7.3 POT 6등 보상 UTXO 처리 ✅ 해결됨
+**해결 방안**: 6등 보상을 1 POT 대신 100 JACK으로 변경
+- POT 발행 문제 회피
+- 100 JACK = 1 POT 교환 가격과 동등 (참가비 환불 개념)
 
 ## 8. 문서 운영 원칙
 - 이 README를 SSOT로 사용합니다.

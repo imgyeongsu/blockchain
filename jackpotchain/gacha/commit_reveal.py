@@ -23,7 +23,7 @@ from ..constants import (
     LOTTO_PRIZE_3RD,
     LOTTO_PRIZE_4TH,
     LOTTO_PRIZE_5TH,
-    LOTTO_PRIZE_6TH_POT,
+    LOTTO_PRIZE_6TH_JACK,
     COIN,
 )
 
@@ -203,8 +203,7 @@ def calculate_payout(prize: LottoPrize, pool_snapshot: int) -> int:
     elif prize == LottoPrize.FIFTH:
         return LOTTO_PRIZE_5TH
     elif prize == LottoPrize.SIXTH:
-        # 6등은 1 POT 재지급 (JACK이 아님, 별도 처리 필요)
-        return 0  # POT은 별도 필드로 처리
+        return LOTTO_PRIZE_6TH_JACK  # 6등: 100 JACK (참가비 환불)
     else:
         return 0
 

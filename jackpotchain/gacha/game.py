@@ -29,7 +29,6 @@ from ..constants import (
     LOTTO_DIGIT_COUNT,
     LOTTO_DIGIT_BASE,
     LOTTO_COMPARISON_OFFSETS,
-    LOTTO_PRIZE_6TH_POT,
     ASSET_ID_POT,
     ASSET_ID_JACK,
     COIN,
@@ -427,7 +426,6 @@ class LottoGame:
 
         # 보상 계산
         payout_jack = 0
-        payout_pot = 0
 
         if prize == LottoPrize.JACKPOT:
             # 1등: Commit 시점 풀 잔액의 50%
@@ -436,11 +434,8 @@ class LottoGame:
                 block_height,
                 tx.get_txid()
             )
-        elif prize == LottoPrize.SIXTH:
-            # 6등: 1 POT 재지급
-            payout_pot = LOTTO_PRIZE_6TH_POT
         elif prize != LottoPrize.NONE:
-            # 2~5등: 고정 JACK 보상
+            # 2~6등: 고정 JACK 보상 (6등도 이제 JACK)
             payout_jack = calculate_payout(prize, commit.pool_snapshot)
 
         # 기록 업데이트
@@ -452,7 +447,7 @@ class LottoGame:
             result_digits=result_digits,
             matches=matches,
             prize=prize,
-            payout=payout_jack or payout_pot
+            payout=payout_jack
         )
 
         return LottoPlayResult(
@@ -460,7 +455,7 @@ class LottoGame:
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=payout_pot,
+            payout_pot=0,  # 더 이상 POT 지급 없음
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
@@ -545,13 +540,10 @@ class LottoGame:
 
         # 예상 보상 계산
         payout_jack = 0
-        payout_pot = 0
         if prize == LottoPrize.JACKPOT:
             payout_jack = self.pool.calculate_jackpot_payout(commit_height)
-        elif prize == LottoPrize.SIXTH:
-            payout_pot = LOTTO_PRIZE_6TH_POT
         elif prize != LottoPrize.NONE:
-            # pool_snapshot 없으면 현재 풀 잔액 사용
+            # 2~6등: 고정 JACK 보상
             pool_snapshot = self.pool.balance
             payout_jack = calculate_payout(prize, pool_snapshot)
 
@@ -560,7 +552,7 @@ class LottoGame:
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=payout_pot,
+            payout_pot=0,  # 더 이상 POT 지급 없음
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )

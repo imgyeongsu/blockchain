@@ -462,6 +462,157 @@ class TestLottoE2E:
 
         print(f"[PASS] Timing validation test")
 
+    def test_guaranteed_win_payout(self, setup_environment):
+        """당첨금 지급 검증 (6등 보장 - 첫 비교 블록 매칭까지 재채굴)"""
+        env = setup_environment
+        blockchain = env['blockchain']
+        mempool = env['mempool']
+        wallet = env['wallet']
+        miner_address = env['miner_address']
+        gacha_service = env['gacha_service']
+        gacha_game = env['gacha_game']
+
+        from jackpotchain.consensus.miner import create_block_template, mine_block
+        from jackpotchain.consensus.difficulty import get_next_difficulty
+
+        print("\n=== 당첨 보장 테스트 (6등 이상) ===")
+
+        # 1. 블록 채굴 (maturity)
+        print("[1] 초기 블록 채굴 (110블록)...")
+        self.mine_blocks(env, 110)
+
+        # 2. POT 교환
+        print("[2] JACK -> POT 교환...")
+        exchange_tx = self.do_exchange(env, 200 * COIN)
+        mempool.add_tx(exchange_tx, blockchain.utxo_set, blockchain.get_height())
+        self.mine_blocks(env, 1)
+
+        # 3. 커밋 생성 - 첫 숫자만 0으로 고정
+        chosen_numbers = [0, 1, 2, 3, 4, 5]
+        print(f"[3] 커밋 생성: {chosen_numbers}")
+
+        commit_tx, pending, error = gacha_service.create_commit(
+            wallet=wallet,
+            utxo_set=blockchain.utxo_set,
+            current_height=blockchain.get_height(),
+            chosen_numbers=chosen_numbers
+        )
+        assert commit_tx is not None, f"Commit failed: {error}"
+
+        mempool.add_tx(commit_tx, blockchain.utxo_set, blockchain.get_height())
+        self.mine_blocks(env, 1)
+
+        commit_height = blockchain.get_height()
+        gacha_service.update_commit_status(
+            pending.commit_hash, commit_tx.get_txid(), commit_height
+        )
+        print(f"  커밋 높이: {commit_height}")
+
+        # 4. 첫 번째 비교 블록(N+3)이 매칭될 때까지 채굴
+        target_height = commit_height + 3
+        target_digit = chosen_numbers[0]  # 첫 번째 숫자
+
+        print(f"[4] 블록 {target_height}이 숫자 {target_digit}(0x{target_digit:x})로 끝날 때까지 채굴...")
+
+        # 먼저 N+1, N+2 채굴
+        self.mine_blocks(env, 2)
+
+        # N+3 블록은 해시 끝자리가 target_digit일 때까지 반복
+        attempts = 0
+        max_attempts = 100
+
+        while attempts < max_attempts:
+            attempts += 1
+
+            # 템플릿 생성
+            txs = mempool.get_txs_for_block()
+            tip = blockchain.get_tip()
+            difficulty = get_next_difficulty(
+                blockchain.get_height(),
+                blockchain.get_block_by_height
+            )
+
+            template = create_block_template(
+                prev_block=tip,
+                miner_address=miner_address,
+                transactions=txs,
+                difficulty_target=difficulty
+            )
+
+            # 채굴
+            result = mine_block(template, max_nonce=100_000_000)
+            if not result.success:
+                continue
+
+            # 해시 끝자리 확인
+            block_hash = result.block.get_hash()
+            last_digit = block_hash[-1] & 0x0F
+
+            if last_digit == target_digit:
+                # 매칭! 블록 추가
+                success, msg = blockchain.add_block(result.block)
+                assert success, f"Block add failed: {msg}"
+                print(f"  시도 {attempts}: 블록 {blockchain.get_height()} 해시 ...{block_hash[-2:].hex()} -> 끝자리 {last_digit} 매치!")
+                break
+            else:
+                # 불일치, nonce 바꿔서 재시도 (템플릿 timestamp 변경으로)
+                import time
+                time.sleep(0.01)  # timestamp 변경용
+
+        assert blockchain.get_height() == target_height, f"블록 {target_height} 채굴 실패"
+
+        # 5. 나머지 블록 채굴 (N+4 ~ N+18)
+        remaining = 18 - 3
+        print(f"[5] 나머지 {remaining}블록 채굴...")
+        self.mine_blocks(env, remaining)
+
+        # 6. 결과 확인
+        result = gacha_game.check_result(
+            commit_hash=pending.commit_hash,
+            chosen_numbers=chosen_numbers,
+            current_height=blockchain.get_height(),
+            commit_height=commit_height
+        )
+        assert result is not None
+        assert result.success
+
+        print(f"  결과: {result.result_digits}")
+        print(f"  매치: {result.matches}개 -> {result.prize.name}")
+        print(f"  예상 지급: {result.payout_jack // COIN} JACK")
+
+        # 최소 1개 매치 확인 (첫 번째 숫자는 보장됨)
+        assert result.matches >= 1, f"첫 번째 숫자 매칭 보장했는데 {result.matches}개?"
+        assert result.payout_jack > 0, "당첨인데 payout이 0"
+
+        # 7. Claim 전 잔액 기록
+        pool_before = sum(u.output.jack_value for u in blockchain.utxo_set.get_pool_utxos())
+
+        # 8. Claim TX 생성 및 채굴
+        print("[6] Claim TX 생성...")
+        claim_tx, error = gacha_service.create_claim(
+            wallet=wallet,
+            utxo_set=blockchain.utxo_set,
+            commit_hash=pending.commit_hash,
+            current_height=blockchain.get_height()
+        )
+        assert claim_tx is not None, f"Claim failed: {error}"
+
+        mempool.add_tx(claim_tx, blockchain.utxo_set, blockchain.get_height())
+        self.mine_blocks(env, 1)
+
+        # 9. 지급 검증
+        pool_after = sum(u.output.jack_value for u in blockchain.utxo_set.get_pool_utxos())
+
+        print(f"\n=== 당첨금 지급 결과 ===")
+        print(f"풀: {pool_before // COIN} -> {pool_after // COIN} JACK")
+
+        # 풀에서 당첨금 지급 확인
+        assert pool_before > pool_after, "풀에서 당첨금이 빠져야 함"
+
+        payout_from_pool = pool_before - pool_after
+        print(f"\n[PASS] {result.prize.name} 당첨!")
+        print(f"[PASS] 당첨금 {payout_from_pool // COIN} JACK 풀에서 지급 완료!")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])

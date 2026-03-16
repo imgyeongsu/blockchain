@@ -15,7 +15,7 @@ from ..consensus.difficulty import difficulty_to_hashrate
 from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
-from ..constants import DEFAULT_RPC_PORT
+from ..constants import DEFAULT_RPC_PORT, LOTTO_MIN_CLAIM_GAP, LOTTO_MAX_CLAIM_GAP
 from ..gacha.game import GachaGame
 from ..gacha.service import GachaService, create_gacha_service
 
@@ -363,6 +363,7 @@ class RPCServer:
                     'vout': utxo.outpoint.index,
                     'address': address,
                     'amount': utxo.output.jack_value / 100_000_000,
+                    'assets': utxo.output.assets,
                     'confirmations': self.blockchain.get_height() - utxo.block_height + 1
                 }
                 for utxo in utxos
@@ -378,6 +379,7 @@ class RPCServer:
                 'txid': utxo.tx_id.hex(),
                 'vout': utxo.output_index,
                 'amount': utxo.output.jack_value / 100_000_000,
+                'assets': utxo.output.assets,
                 'confirmations': max(0, current_height - utxo.block_height + 1),
             }
             for utxo in utxos
@@ -722,14 +724,14 @@ class RPCServer:
             if c.block_height == 0:
                 status = "pending_mine"
                 can_claim = False
-                blocks_until_claimable = 18
+                blocks_until_claimable = LOTTO_MIN_CLAIM_GAP
             else:
                 gap = current_height - c.block_height
-                if gap < 18:
+                if gap < LOTTO_MIN_CLAIM_GAP:
                     status = "pending"
                     can_claim = False
-                    blocks_until_claimable = 18 - gap
-                elif gap <= 80:
+                    blocks_until_claimable = LOTTO_MIN_CLAIM_GAP - gap
+                elif gap <= LOTTO_MAX_CLAIM_GAP:
                     status = "claimable"
                     can_claim = True
                     blocks_until_claimable = 0
@@ -748,9 +750,9 @@ class RPCServer:
                 'status': status,
                 'can_claim': can_claim,
                 'comparison_blocks': comparison_heights,
-                'claim_deadline': commit_height + 80,
+                'claim_deadline': commit_height + LOTTO_MAX_CLAIM_GAP,
                 'blocks_until_claimable': blocks_until_claimable,
-                'blocks_until_expire': max(0, (commit_height + 80) - current_height),
+                'blocks_until_expire': max(0, (commit_height + LOTTO_MAX_CLAIM_GAP) - current_height),
             })
 
         return result

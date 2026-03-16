@@ -205,9 +205,9 @@ class TestClaimTiming:
         valid, _ = is_claim_valid(500, 518)
         assert valid is True
 
-    def test_claim_valid_at_n80(self):
-        """N+80에서 Claim 가능"""
-        valid, _ = is_claim_valid(500, 580)
+    def test_claim_valid_at_n68(self):
+        """N+68에서 Claim 가능 (마지막 유효 블록)"""
+        valid, _ = is_claim_valid(500, 568)
         assert valid is True
 
     def test_claim_too_early(self):
@@ -217,8 +217,8 @@ class TestClaimTiming:
         assert "early" in reason.lower()
 
     def test_claim_expired(self):
-        """N+80 이후 Claim 불가"""
-        valid, reason = is_claim_valid(500, 581)
+        """N+68 이후 Claim 불가"""
+        valid, reason = is_claim_valid(500, 569)
         assert valid is False
         assert "expired" in reason.lower()
 

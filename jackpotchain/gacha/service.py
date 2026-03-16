@@ -722,16 +722,7 @@ class GachaService:
                     script_pubkey=b'JACKPOT_POOL'
                 ))
 
-        # 4. 당첨금 지급 (POT - 6등)
-        payout_pot = result.payout_pot
-        if payout_pot > 0:
-            outputs.append(TxOutput(
-                jack_value=0,
-                script_pubkey=recipient_script,
-                assets={ASSET_ID_POT: payout_pot}
-            ))
-
-        # 5. 사용자 JACK 잔돈
+        # 4. 사용자 JACK 잔돈 (6등 JACK 보상은 이미 payout_jack에 포함)
         jack_change = total_jack - MIN_TX_FEE
         if jack_change > 0:
             change_addr = wallet.get_change_address()
@@ -760,7 +751,7 @@ class GachaService:
                 tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # 이벤트
-        event_type = GachaEvent.WIN if payout_jack > 0 or payout_pot > 0 else GachaEvent.LOSE
+        event_type = GachaEvent.WIN if payout_jack > 0 else GachaEvent.LOSE
         self.events.emit(GachaEventData(
             event=event_type,
             address=pending.address,
@@ -770,8 +761,7 @@ class GachaService:
                 'result_digits': result.result_digits,
                 'matches': result.matches,
                 'prize': result.prize.name,
-                'payout_jack': payout_jack,
-                'payout_pot': payout_pot
+                'payout_jack': payout_jack
             }
         ))
 
