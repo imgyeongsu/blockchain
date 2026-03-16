@@ -6,36 +6,41 @@ $secondary: #00d4ff;
 $warning: #ffbd2e;
 $error: #ff5f56;
 $bg-dark: #0c0c0c;
-$bg-box: #1a1a1a;
-$border: #333333;
-$text-dim: #666666;
-$text: #cccccc;
+$bg-box: #1a1a2e;
+$border: #444444;
+$text-dim: #888888;
+$text: #dddddd;
 
 /* 전역 */
 Screen {
     background: $bg-dark;
 }
 
-/* 탭 바 */
-#tab-bar {
+/* 메뉴 바 */
+#menu-bar {
     dock: top;
     height: 3;
-    background: #1a1a1a;
-    padding: 1;
-}
-
-.tab {
-    padding: 0 2;
-    margin-right: 1;
-    color: $text-dim;
+    width: 100%;
     background: $bg-dark;
-    border: solid $border;
+    layout: horizontal;
 }
 
-.tab.active {
-    color: #000;
+#menu-bar > .menu-item {
+    width: auto;
+    min-width: 14;
+    height: 3;
+    padding: 0 2;
+    color: #888888;
+    background: #1a1a1a;
+    border: solid #333333;
+    content-align: center middle;
+}
+
+#menu-bar > .menu-item.active {
+    color: #000000;
     background: $primary;
     border: solid $primary;
+    text-style: bold;
 }
 
 /* 컨텐츠 영역 */
@@ -43,8 +48,16 @@ Screen {
     padding: 1;
 }
 
-ContentSwitcher > * {
+ContentSwitcher {
     width: 100%;
+    height: 1fr;
+}
+
+/* 스크롤 가능한 위젯 */
+#dashboard, #wallet, #mining, #lotto, #claims, #network {
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
 }
 
 /* 로고 */
@@ -53,6 +66,8 @@ ContentSwitcher > * {
     color: $primary;
     margin-bottom: 1;
     height: auto;
+    border: solid $primary;
+    padding: 1;
 }
 
 /* 메인 그리드 */
@@ -63,8 +78,8 @@ ContentSwitcher > * {
 
 /* 통계 박스 */
 .stat-box {
-    border: solid $border;
-    background: $bg-box;
+    border: solid #333333;
+    background: #111111;
     padding: 1;
     margin-bottom: 1;
     height: auto;
@@ -96,7 +111,7 @@ Horizontal {
 
 .stat-label {
     color: $text-dim;
-    width: 12;
+    width: 14;
 }
 
 .stat-value {
@@ -111,12 +126,11 @@ Horizontal {
 
 /* 잭팟 박스 */
 #jackpot-box {
-    border: solid $warning;
-    background: $bg-box;
-    padding: 1;
+    border: double $warning;
+    background: #111111;
+    padding: 1 2;
     text-align: center;
     height: auto;
-    width: 1fr;
 }
 
 .jackpot-amount {
@@ -126,7 +140,7 @@ Horizontal {
 }
 
 .prize-info {
-    color: $text-dim;
+    color: #888888;
     text-align: center;
 }
 
@@ -140,10 +154,41 @@ Horizontal {
     margin-right: 1;
 }
 
+/* 액션 버튼 행 */
+.action-row {
+    height: auto;
+}
+
+.action-btn {
+    margin-right: 1;
+}
+
+/* Wallet 레이아웃 */
+.wallet-left {
+    width: 1fr;
+    margin-right: 1;
+}
+
+.wallet-right {
+    width: 1fr;
+}
+
+.wallet-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+/* Send 입력 */
+#send-panel Input,
+#exchange-panel Input {
+    width: 1fr;
+    margin-right: 1;
+}
+
 /* 테이블 */
 DataTable {
-    height: 8;
-    margin-bottom: 1;
+    height: 6;
+    margin-bottom: 0;
 }
 
 DataTable > .datatable--header {
@@ -155,6 +200,7 @@ DataTable > .datatable--header {
 .lotto-top {
     height: auto;
     margin-bottom: 1;
+    layout: horizontal;
 }
 
 .lotto-left {
@@ -167,23 +213,18 @@ DataTable > .datatable--header {
 }
 
 .lotto-numbers {
-    height: 3;
+    height: auto;
     margin-bottom: 1;
-}
-
-.lotto-input {
-    width: 8;
-    margin-right: 1;
-    text-align: center;
 }
 
 .lotto-buttons {
     height: auto;
+    align: center middle;
 }
 
 .lotto-buttons Button {
     margin-right: 1;
-    min-width: 12;
+    min-width: 16;
 }
 
 /* Exchange 영역 */
@@ -220,4 +261,38 @@ DataTable > .datatable--header {
 
 .hidden {
     display: none;
+}
+
+/* Input 스타일 */
+.lotto-input {
+    width: 6;
+    margin-right: 1;
+    text-align: center;
+    color: $warning;
+    background: #1a1a1a;
+    border: solid $warning;
+}
+
+/* 로또 번호 박스 */
+.lotto-num-box {
+    width: 5;
+    height: 3;
+    border: solid $warning;
+    background: #1a1a1a;
+    color: $warning;
+    text-align: center;
+    content-align: center middle;
+    margin-right: 1;
+}
+
+/* Progress bar */
+.progress-bar {
+    height: 1;
+    background: #333333;
+    margin: 1 0;
+}
+
+.progress-fill {
+    height: 1;
+    background: $primary;
 }

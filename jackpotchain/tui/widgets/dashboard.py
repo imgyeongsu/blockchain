@@ -6,12 +6,12 @@ Dashboard Widget
 
 from textual.app import ComposeResult
 from textual.widgets import Static, Label
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
 
 
-class DashboardWidget(Container):
+class DashboardWidget(ScrollableContainer):
     """대시보드 위젯"""
 
     def __init__(self, rpc: RPCClient, **kwargs):
@@ -21,10 +21,7 @@ class DashboardWidget(Container):
     def compose(self) -> ComposeResult:
         # 로고
         yield Static(
-            "  ╔═══════════════════════════════════════╗\n"
-            "  ║         JACKPOT CHAIN                 ║\n"
-            "  ║  UTXO Blockchain + On-chain Lottery   ║\n"
-            "  ╚═══════════════════════════════════════╝",
+            "JACKPOT CHAIN\nUTXO Blockchain + On-chain Lottery",
             id="logo"
         )
 

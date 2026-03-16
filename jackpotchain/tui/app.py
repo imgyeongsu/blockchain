@@ -6,13 +6,14 @@ textual 기반 메인 앱 (ContentSwitcher 방식)
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Header, Footer, Static, Label, ContentSwitcher
-from textual.containers import Container, Horizontal, Vertical
+from textual.widgets import Header, Footer, ContentSwitcher, Static
+from textual.containers import Container, Horizontal
 
 from .widgets.dashboard import DashboardWidget
 from .widgets.wallet import WalletWidget
 from .widgets.mining import MiningWidget
 from .widgets.lotto import LottoWidget
+from .widgets.claims import ClaimsWidget
 from .widgets.network import NetworkWidget
 from .client import RPCClient
 
@@ -25,13 +26,14 @@ class JackpotChainApp(App):
     SUB_TITLE = "UTXO Blockchain + On-chain Lottery"
 
     BINDINGS = [
-        Binding("1", "show_tab('dashboard')", "[1] Dashboard", show=True),
-        Binding("2", "show_tab('wallet')", "[2] Wallet", show=True),
-        Binding("3", "show_tab('mining')", "[3] Mining", show=True),
-        Binding("4", "show_tab('lotto')", "[4] Lotto", show=True),
-        Binding("5", "show_tab('network')", "[5] Network", show=True),
-        Binding("r", "refresh", "[R] Refresh", show=True),
-        Binding("q", "quit", "[Q] Quit", show=True),
+        Binding("f1", "show_tab('dashboard')", "Dashboard", show=True, priority=True),
+        Binding("f2", "show_tab('wallet')", "Wallet", show=True, priority=True),
+        Binding("f3", "show_tab('mining')", "Mining", show=True, priority=True),
+        Binding("f4", "show_tab('lotto')", "Lotto", show=True, priority=True),
+        Binding("f5", "show_tab('claims')", "Claims", show=True, priority=True),
+        Binding("f6", "show_tab('network')", "Network", show=True, priority=True),
+        Binding("ctrl+r", "refresh", "Refresh", show=True, priority=True),
+        Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8332):
@@ -43,22 +45,23 @@ class JackpotChainApp(App):
         """UI 구성"""
         yield Header()
 
-        # 탭 메뉴
+        # 메뉴 바
         yield Horizontal(
-            Static("[1] Dashboard", id="tab-dashboard", classes="tab active"),
-            Static("[2] Wallet", id="tab-wallet", classes="tab"),
-            Static("[3] Mining", id="tab-mining", classes="tab"),
-            Static("[4] Lotto", id="tab-lotto", classes="tab"),
-            Static("[5] Network", id="tab-network", classes="tab"),
-            id="tab-bar",
+            Static("[1] Dashboard", id="menu-dashboard", classes="menu-item active"),
+            Static("[2] Wallet", id="menu-wallet", classes="menu-item"),
+            Static("[3] Mining", id="menu-mining", classes="menu-item"),
+            Static("[4] Lotto", id="menu-lotto", classes="menu-item"),
+            Static("[5] Claims", id="menu-claims", classes="menu-item"),
+            Static("[6] Network", id="menu-network", classes="menu-item"),
+            id="menu-bar",
         )
 
-        # 컨텐츠 영역
         yield ContentSwitcher(
             DashboardWidget(self.rpc, id="dashboard"),
             WalletWidget(self.rpc, id="wallet"),
             MiningWidget(self.rpc, id="mining"),
             LottoWidget(self.rpc, id="lotto"),
+            ClaimsWidget(self.rpc, id="claims"),
             NetworkWidget(self.rpc, id="network"),
             initial="dashboard",
             id="content",
@@ -68,7 +71,8 @@ class JackpotChainApp(App):
 
     def on_mount(self) -> None:
         """앱 마운트 시"""
-        self._update_tabs()
+        self._update_header()
+        self._update_menu()
 
     async def on_unmount(self) -> None:
         """앱 언마운트 시"""
@@ -78,17 +82,31 @@ class JackpotChainApp(App):
         """탭 전환"""
         self._current_tab = tab_name
         self.query_one("#content", ContentSwitcher).current = tab_name
-        self._update_tabs()
+        self._update_header()
+        self._update_menu()
         self.action_refresh()
 
-    def _update_tabs(self) -> None:
-        """탭 스타일 업데이트"""
-        for tab in ["dashboard", "wallet", "mining", "lotto", "network"]:
-            tab_widget = self.query_one(f"#tab-{tab}", Static)
+    def _update_header(self) -> None:
+        """헤더 업데이트"""
+        titles = {
+            "dashboard": "Dashboard",
+            "wallet": "Wallet",
+            "mining": "Mining",
+            "lotto": "Lotto",
+            "claims": "Claims",
+            "network": "Network",
+        }
+        self.sub_title = titles.get(self._current_tab, "Dashboard")
+
+    def _update_menu(self) -> None:
+        """메뉴 바 업데이트"""
+        tabs = ["dashboard", "wallet", "mining", "lotto", "claims", "network"]
+        for tab in tabs:
+            menu_item = self.query_one(f"#menu-{tab}", Static)
             if tab == self._current_tab:
-                tab_widget.add_class("active")
+                menu_item.add_class("active")
             else:
-                tab_widget.remove_class("active")
+                menu_item.remove_class("active")
 
     def action_refresh(self) -> None:
         """현재 탭 새로고침"""

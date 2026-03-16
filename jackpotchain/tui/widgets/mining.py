@@ -6,12 +6,12 @@ Mining Widget
 
 from textual.app import ComposeResult
 from textual.widgets import Static, Label, Button, ProgressBar
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
 
 
-class MiningWidget(Container):
+class MiningWidget(ScrollableContainer):
     """채굴 위젯"""
 
     def __init__(self, rpc: RPCClient, **kwargs):

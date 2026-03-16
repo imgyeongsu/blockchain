@@ -6,12 +6,12 @@ Network Widget
 
 from textual.app import ComposeResult
 from textual.widgets import Static, Label, DataTable
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
 
 
-class NetworkWidget(Container):
+class NetworkWidget(ScrollableContainer):
     """네트워크 위젯"""
 
     def __init__(self, rpc: RPCClient, **kwargs):
