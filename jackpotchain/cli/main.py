@@ -9,7 +9,20 @@ import argparse
 import asyncio
 import time
 import sys
+import os
 from pathlib import Path
+
+
+def get_default_data_dir() -> str:
+    """기본 데이터 디렉토리 (%APPDATA%/JackpotChain/data)"""
+    appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    return os.path.join(appdata, 'JackpotChain', 'data')
+
+
+def get_default_wallet_file() -> str:
+    """기본 지갑 파일 (%APPDATA%/JackpotChain/wallets/default.json)"""
+    appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    return os.path.join(appdata, 'JackpotChain', 'wallets', 'default.json')
 
 
 def main():
@@ -24,7 +37,8 @@ def main():
     node_parser = subparsers.add_parser('node', help='Run a node')
     node_parser.add_argument('--port', type=int, default=8333, help='P2P port')
     node_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
-    node_parser.add_argument('--data-dir', default='./data', help='Data directory')
+    node_parser.add_argument('--data-dir', default=None, help='Data directory (default: %%APPDATA%%/JackpotChain/data)')
+    node_parser.add_argument('--wallet-file', default=None, help='Wallet file path (default: %%APPDATA%%/JackpotChain/wallets/default.json)')
     node_parser.add_argument('--seed', action='append', help='Seed node (ip:port)')
     # 채굴 통합 옵션
     node_parser.add_argument('--mine', action='store_true', help='Enable mining')
@@ -37,7 +51,7 @@ def main():
     # wallet 명령
     wallet_parser = subparsers.add_parser('wallet', help='Wallet operations')
     wallet_parser.add_argument('action', choices=['create', 'balance', 'address', 'send'])
-    wallet_parser.add_argument('--wallet-file', default='./wallet.json')
+    wallet_parser.add_argument('--wallet-file', default=None, help='Wallet file path')
     wallet_parser.add_argument('--to', help='Recipient address (for send)')
     wallet_parser.add_argument('--amount', type=float, help='Amount (for send)')
 
@@ -45,6 +59,11 @@ def main():
     mine_parser = subparsers.add_parser('mine', help='Mining (standalone, use node --mine instead)')
     mine_parser.add_argument('--address', required=True, help='Mining reward address')
     mine_parser.add_argument('--threads', type=int, default=1, help='Mining threads')
+
+    # tui 명령
+    tui_parser = subparsers.add_parser('tui', help='Launch Terminal UI')
+    tui_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC host')
+    tui_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
 
     args = parser.parse_args()
 
@@ -54,31 +73,44 @@ def main():
         run_wallet(args)
     elif args.command == 'mine':
         run_miner(args)
+    elif args.command == 'tui':
+        run_tui(args)
     else:
-        parser.print_help()
+        # 인자 없이 실행하면 TUI 시작
+        run_tui_default()
 
 
 def run_node(args):
     """노드 실행 (채굴 통합 지원)"""
-    from ..consensus.chain import Blockchain
-    from ..network.node import Node, NodeConfig
-    from ..rpc.server import RPCServer
-    from ..mempool.pool import Mempool
-    from ..wallet.wallet import Wallet
+    from jackpotchain.consensus.chain import Blockchain
+    from jackpotchain.network.node import Node, NodeConfig
+    from jackpotchain.rpc.server import RPCServer
+    from jackpotchain.mempool.pool import Mempool
+    from jackpotchain.wallet.wallet import Wallet
 
     # 채굴 옵션 검증
     if args.mine and not args.address:
         print("Error: --address required when --mine is enabled")
         sys.exit(1)
 
+    # 기본 경로 설정
+    data_dir = args.data_dir or get_default_data_dir()
+    wallet_file = args.wallet_file or get_default_wallet_file()
+
+    # 지갑 디렉토리 생성
+    wallet_dir = os.path.dirname(wallet_file)
+    if wallet_dir:
+        os.makedirs(wallet_dir, exist_ok=True)
+
     print(f"Starting JackpotChain node on port {args.port}...")
-    print(f"Data directory: {args.data_dir}")
+    print(f"Data directory: {data_dir}")
+    print(f"Wallet file: {wallet_file}")
 
     # 초기화 (영구 저장 활성화)
-    blockchain = Blockchain(data_dir=args.data_dir)
+    blockchain = Blockchain(data_dir=data_dir)
     mempool = Mempool()
-    # TODO: --wallet 옵션으로 지갑 파일 분리 지원
-    wallet = Wallet("wallet.json")
+    # 지갑 파일 로드
+    wallet = Wallet(wallet_file)
 
     config = NodeConfig(
         port=args.port,
@@ -90,7 +122,7 @@ def run_node(args):
 
     # 시드 노드 추가
     if args.seed:
-        from ..network.peer import PeerAddress
+        from jackpotchain.network.peer import PeerAddress
         seeds = []
         for seed in args.seed:
             ip, port = seed.split(':')
@@ -116,9 +148,9 @@ def run_node(args):
 
     async def mining_task():
         """백그라운드 채굴 태스크"""
-        from ..consensus.miner import create_block_template, mine_block
-        from ..consensus.difficulty import get_next_difficulty
-        from ..script.standard import get_address_from_script_pubkey
+        from jackpotchain.consensus.miner import create_block_template, mine_block
+        from jackpotchain.consensus.difficulty import get_next_difficulty
+        from jackpotchain.script.standard import get_address_from_script_pubkey
 
         print(f"Mining enabled. Reward address: {args.address}")
         mining_stats['is_mining'] = True
@@ -176,6 +208,9 @@ def run_node(args):
                     # 체인에 추가 (UTXO 자동 적용됨)
                     success, msg = blockchain.add_block(result.block)
                     if success:
+                        # Mempool에서 포함된 TX 제거
+                        for tx in result.block.transactions[1:]:  # coinbase 제외
+                            mempool.remove_tx(tx.get_txid())
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
                         print(f"[Miner] Block added and broadcasted. New height: {blockchain.get_height()}")
@@ -251,10 +286,17 @@ def run_node(args):
 
 def run_wallet(args):
     """지갑 작업"""
-    from ..wallet.wallet import Wallet
-    from ..consensus.chain import Blockchain
+    from jackpotchain.wallet.wallet import Wallet
+    from jackpotchain.consensus.chain import Blockchain
 
-    wallet = Wallet(args.wallet_file)
+    wallet_file = args.wallet_file or get_default_wallet_file()
+
+    # 지갑 디렉토리 생성
+    wallet_dir = os.path.dirname(wallet_file)
+    if wallet_dir:
+        os.makedirs(wallet_dir, exist_ok=True)
+
+    wallet = Wallet(wallet_file)
 
     if args.action == 'create':
         address = wallet.generate_address()
@@ -280,18 +322,31 @@ def run_wallet(args):
         print("Use RPC: sendtoaddress")
 
 
+def run_tui(args):
+    """TUI 실행 (RPC 옵션 지정)"""
+    from jackpotchain.tui.app import run_tui as start_tui
+    start_tui(host=args.rpc_host, port=args.rpc_port)
+
+
+def run_tui_default():
+    """TUI 기본 실행 (127.0.0.1:8332)"""
+    from jackpotchain.tui.app import run_tui as start_tui
+    start_tui()
+
+
 def run_miner(args):
     """독립 채굴 실행 (레거시, node --mine 권장)"""
-    from ..consensus.chain import Blockchain
-    from ..consensus.miner import create_block_template, mine_block
-    from ..consensus.difficulty import get_next_difficulty
-    from ..mempool.pool import Mempool
-    from ..script.standard import get_address_from_script_pubkey
+    from jackpotchain.consensus.chain import Blockchain
+    from jackpotchain.consensus.miner import create_block_template, mine_block
+    from jackpotchain.consensus.difficulty import get_next_difficulty
+    from jackpotchain.mempool.pool import Mempool
+    from jackpotchain.script.standard import get_address_from_script_pubkey
 
     print(f"[WARNING] Standalone mining. Use 'node --mine' for integrated mining.")
     print(f"Starting miner. Reward address: {args.address}")
 
-    blockchain = Blockchain()
+    data_dir = get_default_data_dir()
+    blockchain = Blockchain(data_dir=data_dir)
     mempool = Mempool()
 
     def mining_callback(nonce, hash_count):

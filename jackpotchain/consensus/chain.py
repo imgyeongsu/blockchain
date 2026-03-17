@@ -13,7 +13,8 @@ from enum import Enum
 from ..core.block import Block, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
-from ..script.standard import get_address_from_script_pubkey
+from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_hash
+from ..constants import TX_VERSION_COMMIT
 
 
 class ChainState(Enum):
@@ -42,6 +43,14 @@ class BlockIndex:
     total_work: int  # 누적 작업량
     is_valid: bool = True
     is_in_main_chain: bool = True
+
+
+@dataclass
+class CommitInfo:
+    """Commit TX 인덱스 정보 (Claim 검증용)"""
+    tx_id: bytes
+    block_height: int
+    block_hash: bytes
 
 
 class Blockchain:
@@ -75,6 +84,9 @@ class Blockchain:
         # Undo 데이터 (Reorg용): block_hash -> List[List[UTXO]]
         # 각 블록의 각 TX가 소비한 UTXO들 저장
         self._undo_data: Dict[bytes, List[List[UTXO]]] = {}
+
+        # Commit TX 인덱스 (Claim 검증용): commit_hash -> CommitInfo
+        self._commit_index: Dict[bytes, CommitInfo] = {}
 
         # 상태
         self.state = ChainState.SYNCING
@@ -113,9 +125,11 @@ class Blockchain:
                     else:
                         self._add_block_internal(block, height)
 
-                    # UTXO 업데이트
+                    # UTXO 업데이트 + Commit 인덱싱
+                    block_hash = block.get_hash()
                     for tx in block.transactions:
                         self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
+                        self._index_commit_tx(tx, height, block_hash)
 
             print(f"[Chain] Loaded {tip_height + 1} blocks. Height: {self.get_height()}")
 
@@ -335,7 +349,7 @@ class Blockchain:
 
     def _connect_block(self, block: Block, height: int):
         """
-        블록 연결 (UTXO 적용 + undo 데이터 저장)
+        블록 연결 (UTXO 적용 + undo 데이터 저장 + commit 인덱싱)
 
         Args:
             block: 연결할 블록
@@ -349,12 +363,15 @@ class Blockchain:
             spent_utxos = self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
             undo_data.append(spent_utxos)
 
+            # Commit TX 인덱싱
+            self._index_commit_tx(tx, height, block_hash)
+
         # Undo 데이터 저장 (나중에 disconnect용)
         self._undo_data[block_hash] = undo_data
 
     def _disconnect_block(self, block_hash: bytes):
         """
-        블록 연결 해제 (UTXO 되돌리기)
+        블록 연결 해제 (UTXO 되돌리기 + commit 인덱스 제거)
 
         Args:
             block_hash: 연결 해제할 블록 해시
@@ -371,6 +388,9 @@ class Blockchain:
             spent_utxos = undo_data[i] if i < len(undo_data) else []
             self.utxo_set.revert_transaction(tx, spent_utxos, get_address_from_script_pubkey)
 
+            # Commit TX 인덱스 제거
+            self._unindex_commit_tx(tx)
+
         # Undo 데이터 제거
         self._undo_data.pop(block_hash, None)
 
@@ -385,6 +405,53 @@ class Blockchain:
                 break
             current = index.prev_hash
         return ancestors
+
+    def _index_commit_tx(self, tx, height: int, block_hash: bytes):
+        """
+        Commit TX 인덱싱 (claim 검증용)
+
+        Commit TX의 OP_RETURN에서 commit_hash 추출 후 인덱스에 저장
+        """
+        if tx.version != TX_VERSION_COMMIT:
+            return
+
+        # OP_RETURN output에서 commit_hash 추출
+        for output in tx.outputs:
+            if is_commit_script(output.script_pubkey):
+                commit_hash = extract_commit_hash(output.script_pubkey)
+                if commit_hash:
+                    self._commit_index[commit_hash] = CommitInfo(
+                        tx_id=tx.get_txid(),
+                        block_height=height,
+                        block_hash=block_hash
+                    )
+                    return
+
+    def _unindex_commit_tx(self, tx):
+        """
+        Commit TX 인덱스 제거 (reorg 시)
+        """
+        if tx.version != TX_VERSION_COMMIT:
+            return
+
+        for output in tx.outputs:
+            if is_commit_script(output.script_pubkey):
+                commit_hash = extract_commit_hash(output.script_pubkey)
+                if commit_hash and commit_hash in self._commit_index:
+                    del self._commit_index[commit_hash]
+                    return
+
+    def get_commit_info(self, commit_hash: bytes) -> Optional[CommitInfo]:
+        """
+        Commit 정보 조회 (claim 검증용)
+
+        Args:
+            commit_hash: Commit TX의 commit_hash
+
+        Returns:
+            CommitInfo or None
+        """
+        return self._commit_index.get(commit_hash)
 
     def get_block(self, block_hash: bytes) -> Optional[Block]:
         """블록 조회"""

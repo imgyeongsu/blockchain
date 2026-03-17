@@ -181,7 +181,7 @@ def determine_prize(matches: int) -> LottoPrize:
     return prize_map.get(matches, LottoPrize.NONE)
 
 
-def calculate_payout(prize: LottoPrize, pool_snapshot: int) -> int:
+def calculate_payout(prize: LottoPrize, pool_snapshot: int) -> Tuple[int, int]:
     """
     등급별 보상 계산
 
@@ -190,23 +190,22 @@ def calculate_payout(prize: LottoPrize, pool_snapshot: int) -> int:
         pool_snapshot: Commit 시점 잭팟 풀 잔액 (1등용)
 
     Returns:
-        payout: JACK satoshi 단위 (6등은 POT으로 따로 처리)
+        (jack_payout, pot_payout): JACK과 POT satoshi 단위
     """
     if prize == LottoPrize.JACKPOT:
-        return int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO)
+        return (int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO), 0)
     elif prize == LottoPrize.SECOND:
-        return LOTTO_PRIZE_2ND
+        return (LOTTO_PRIZE_2ND, 0)
     elif prize == LottoPrize.THIRD:
-        return LOTTO_PRIZE_3RD
+        return (LOTTO_PRIZE_3RD, 0)
     elif prize == LottoPrize.FOURTH:
-        return LOTTO_PRIZE_4TH
+        return (LOTTO_PRIZE_4TH, 0)
     elif prize == LottoPrize.FIFTH:
-        return LOTTO_PRIZE_5TH
+        return (LOTTO_PRIZE_5TH, 0)
     elif prize == LottoPrize.SIXTH:
-        # 6등은 1 POT 재지급 (JACK이 아님, 별도 처리 필요)
-        return 0  # POT은 별도 필드로 처리
+        return (0, LOTTO_PRIZE_6TH_POT)  # 6등: 1 POT mint
     else:
-        return 0
+        return (0, 0)
 
 
 def get_comparison_heights(commit_height: int) -> List[int]:

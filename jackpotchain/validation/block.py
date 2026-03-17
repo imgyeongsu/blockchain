@@ -172,7 +172,8 @@ def validate_block_transactions(
     block: Block,
     utxo_set: UTXOSet,
     block_height: int,
-    expected_reward: int = BLOCK_REWARD
+    expected_reward: int = BLOCK_REWARD,
+    blockchain = None
 ) -> BlockValidationResult:
     """
     블록 내 트랜잭션 검증
@@ -181,12 +182,19 @@ def validate_block_transactions(
     - 각 TX 유효성
     - Coinbase 보상
     - 수수료 합계
+
+    Args:
+        block: 검증할 블록
+        utxo_set: UTXO Set
+        block_height: 블록 높이
+        expected_reward: 예상 블록 보상
+        blockchain: Blockchain 참조 (LOTTO_CLAIM 검증용, optional)
     """
     total_fees = 0
 
     # 일반 TX 검증 (Coinbase 제외)
     for tx in block.transactions[1:]:
-        result = validate_transaction(tx, utxo_set, block_height)
+        result = validate_transaction(tx, utxo_set, block_height, blockchain)
         if not result.is_valid:
             return BlockValidationResult(
                 is_valid=False,
@@ -222,10 +230,20 @@ def validate_block(
     block_height: int,
     prev_header: Optional[BlockHeader] = None,
     expected_difficulty: int = None,
-    expected_reward: int = BLOCK_REWARD
+    expected_reward: int = BLOCK_REWARD,
+    blockchain = None
 ) -> BlockValidationResult:
     """
     전체 블록 검증 (통합)
+
+    Args:
+        block: 검증할 블록
+        utxo_set: UTXO Set
+        block_height: 블록 높이
+        prev_header: 이전 블록 헤더
+        expected_difficulty: 예상 난이도
+        expected_reward: 예상 블록 보상
+        blockchain: Blockchain 참조 (LOTTO_CLAIM 검증용, optional)
     """
     # 1. 헤더 검증
     result = validate_block_header(
@@ -246,7 +264,8 @@ def validate_block(
         block,
         utxo_set,
         block_height,
-        expected_reward
+        expected_reward,
+        blockchain
     )
     if not result.is_valid:
         return result

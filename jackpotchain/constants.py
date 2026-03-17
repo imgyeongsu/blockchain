@@ -91,7 +91,8 @@ LOTTO_PRIZE_2ND = 100_000 * COIN # 2등: 100,000 JACK
 LOTTO_PRIZE_3RD = 20_000 * COIN  # 3등: 20,000 JACK
 LOTTO_PRIZE_4TH = 2_000 * COIN   # 4등: 2,000 JACK
 LOTTO_PRIZE_5TH = 300 * COIN     # 5등: 300 JACK
-LOTTO_PRIZE_6TH_POT = 1 * COIN   # 6등: 1 POT 재지급
+LOTTO_PRIZE_6TH_POT = 1 * COIN   # 6등: 1 POT (mint - 참가비 환불)
+LOTTO_PRIZE_6TH_JACK = 100 * COIN # 6등 대안: 100 JACK (deprecated)
 
 # 하위 호환 (deprecated)
 GACHA_WIN_PROBABILITY = 1 / (16 ** 6)  # 1등 확률 참고용
@@ -135,8 +136,8 @@ COINBASE_MATURITY = 100          # Coinbase 사용 가능까지 필요한 확인
 # =============================================================================
 # 네트워크 제한
 # =============================================================================
-MAX_OUTBOUND_CONNECTIONS = 6
-MAX_INBOUND_CONNECTIONS = 2
+MAX_OUTBOUND_CONNECTIONS = 8
+MAX_INBOUND_CONNECTIONS = 32  # 시드노드는 많은 연결 수용
 MAX_INV_SIZE = 50000             # INV 메시지 최대 항목
 MAX_HEADERS_SIZE = 2000          # HEADERS 응답 최대 개수
 

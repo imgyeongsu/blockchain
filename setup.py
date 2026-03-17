@@ -13,6 +13,9 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "aiohttp>=3.8.0",
+        "ecdsa>=0.18.0",
+        "textual>=0.50.0",
+        "rich>=13.0.0",
     ],
     extras_require={
         "dev": [
@@ -22,7 +25,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "jackpotchain=cli.main:main",
+            "jackpotchain=jackpotchain.cli.main:main",
         ],
     },
     classifiers=[

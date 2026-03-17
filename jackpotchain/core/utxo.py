@@ -95,6 +95,17 @@ class UTXOSet:
         outpoints = self._by_address.get(address, set())
         return [self._utxos[op] for op in outpoints if op in self._utxos]
 
+    def get_all_utxos(self) -> list:
+        """모든 UTXO 반환"""
+        return list(self._utxos.values())
+
+    def get_pool_utxos(self) -> list:
+        """잭팟 풀 UTXO 반환"""
+        return [
+            utxo for utxo in self._utxos.values()
+            if utxo.output.script_pubkey == b'JACKPOT_POOL'
+        ]
+
     def get_balance(self, address: str, current_height: int = 0) -> int:
         """주소의 잔액 (성숙한 UTXO만)"""
         utxos = self.get_utxos_for_address(address)

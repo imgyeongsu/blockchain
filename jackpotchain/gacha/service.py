@@ -54,7 +54,8 @@ from .commit_reveal import (
     is_claim_valid,
 )
 from .pool import JackpotPool
-from .game import GachaGame, GachaPlayResult
+from .game import GachaGame, GachaPlayResult, LottoPlayResult, LottoGame
+from .commit_reveal import LottoPrize
 
 
 # =============================================================================
@@ -413,10 +414,10 @@ class GachaService:
         # 출력 생성
         outputs = []
 
-        # 1. Commit OP_RETURN (숫자 배열 포함)
+        # 1. Commit OP_RETURN (해시만 - 숫자는 로컬 저장)
         outputs.append(TxOutput(
             jack_value=0,
-            script_pubkey=create_commit_script(commit_hash, actual_numbers)
+            script_pubkey=create_commit_script(commit_hash)
         ))
 
         # 2. POT 잔돈
@@ -446,16 +447,15 @@ class GachaService:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
+        # 서명 (Bitcoin SIGHASH_ALL 방식)
         for i, (inp, utxo) in enumerate(inputs):
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
                 from ..script.standard import create_p2pkh_script_sig
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # PendingCommit 생성
         addresses = wallet.get_addresses()
@@ -470,6 +470,7 @@ class GachaService:
             chosen_numbers=actual_numbers,
             address=player_address,
             created_at=time.time(),
+            tx_id=tx.get_txid(),
             pool_snapshot=pool_snapshot,
             gacha_type=gacha_type
         )
@@ -568,15 +569,14 @@ class GachaService:
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
+        # 서명 (Bitcoin SIGHASH_ALL 방식)
         for i, (inp, utxo) in enumerate(inputs):
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # 이벤트
         self.events.emit(GachaEventData(
@@ -592,6 +592,24 @@ class GachaService:
     # Claim 생성 (16-2 Final)
     # =========================================================================
 
+    def _select_pool_utxos(
+        self,
+        utxo_set: UTXOSet,
+        amount_needed: int
+    ) -> List[UTXO]:
+        """잭팟 풀 UTXO 선택"""
+        all_pool_utxos = utxo_set.get_pool_utxos()
+        selected = []
+        total = 0
+
+        for utxo in all_pool_utxos:
+            selected.append(utxo)
+            total += utxo.output.jack_value
+            if total >= amount_needed:
+                break
+
+        return selected if total >= amount_needed else []
+
     def create_claim(
         self,
         wallet,
@@ -600,7 +618,7 @@ class GachaService:
         current_height: int
     ) -> Tuple[Optional[Transaction], str]:
         """
-        Claim TX 생성 (16-2 Final)
+        Claim TX 생성 (당첨금 지급 포함)
 
         Args:
             wallet: 지갑 인스턴스
@@ -624,6 +642,18 @@ class GachaService:
             if not valid:
                 return None, reason
 
+        # 결과 확인 (당첨 여부 및 지급액 계산)
+        result = self.game.check_result(
+            commit_hash=commit_hash,
+            chosen_numbers=pending.chosen_numbers,
+            current_height=current_height,
+            commit_height=pending.block_height
+        )
+
+        if result is None or not result.success:
+            error_msg = result.error if result else "Result check failed"
+            return None, error_msg
+
         # JACK UTXO 선택 (수수료용)
         jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height)
         if not jack_utxos:
@@ -632,7 +662,9 @@ class GachaService:
         # TX 입력
         inputs = []
         total_jack = 0
+        pool_input_total = 0
 
+        # 1. 사용자 UTXO (수수료)
         for utxo in jack_utxos:
             inp = TxInput(
                 prev_tx_id=utxo.tx_id,
@@ -640,13 +672,33 @@ class GachaService:
                 script_sig=b'',
                 sequence=0xFFFFFFFF
             )
-            inputs.append((inp, utxo))
+            inputs.append((inp, utxo, False))  # False = not pool
             total_jack += utxo.output.jack_value
+
+        # 2. 잭팟 풀 UTXO (당첨금 - JACK 지급용)
+        payout_jack = result.payout_jack
+        payout_pot = result.payout_pot
+        if payout_jack > 0:
+            pool_utxos = self._select_pool_utxos(utxo_set, payout_jack)
+            if not pool_utxos:
+                return None, f"Insufficient pool balance for payout: {payout_jack}"
+
+            for utxo in pool_utxos:
+                inp = TxInput(
+                    prev_tx_id=utxo.tx_id,
+                    output_index=utxo.output_index,
+                    script_sig=b'',  # 풀은 서명 불필요 (특수 검증)
+                    sequence=0xFFFFFFFF
+                )
+                inputs.append((inp, utxo, True))  # True = pool
+                pool_input_total += utxo.output.jack_value
 
         # TX 출력
         outputs = []
+        recipient_addr = pending.address
+        recipient_script = create_p2pkh_script_pubkey(address_to_pubkey_hash(recipient_addr))
 
-        # 1. Claim OP_RETURN
+        # 1. Claim OP_RETURN (결과 기록)
         outputs.append(TxOutput(
             jack_value=0,
             script_pubkey=create_claim_script(
@@ -656,7 +708,30 @@ class GachaService:
             )
         ))
 
-        # 2. JACK 잔돈
+        # 2. 당첨금 지급 (JACK)
+        if payout_jack > 0:
+            outputs.append(TxOutput(
+                jack_value=payout_jack,
+                script_pubkey=recipient_script
+            ))
+
+            # 3. 풀 잔돈 반환
+            pool_change = pool_input_total - payout_jack
+            if pool_change > 0:
+                outputs.append(TxOutput(
+                    jack_value=pool_change,
+                    script_pubkey=b'JACKPOT_POOL'
+                ))
+
+        # 3. 6등 POT 보상 (mint - input 없이 생성)
+        if payout_pot > 0:
+            outputs.append(TxOutput(
+                jack_value=0,
+                script_pubkey=recipient_script,
+                assets={ASSET_ID_POT: payout_pot}
+            ))
+
+        # 4. 사용자 JACK 잔돈
         jack_change = total_jack - MIN_TX_FEE
         if jack_change > 0:
             change_addr = wallet.get_change_address()
@@ -668,27 +743,35 @@ class GachaService:
         # TX 생성
         tx = Transaction(
             version=TX_VERSION_LOTTO_CLAIM,
-            inputs=[inp for inp, _ in inputs],
+            inputs=[inp for inp, _, _ in inputs],
             outputs=outputs,
             locktime=0
         )
 
-        # 서명
-        tx_hash = tx.get_txid()
-        for i, (inp, utxo) in enumerate(inputs):
+        # 서명 (풀 UTXO는 서명 불필요)
+        for i, (inp, utxo, is_pool) in enumerate(inputs):
+            if is_pool:
+                continue  # 풀 UTXO는 서명 스킵
             address = self._get_utxo_address(utxo)
             if address and address in wallet._addresses:
                 info = wallet._addresses[address]
-                signature = sign(tx_hash, info.private_key)
-                inp.script_sig = create_p2pkh_script_sig(signature, info.public_key)
-                tx.inputs[i].script_sig = inp.script_sig
+                sig_hash = tx.get_signature_hash(i, utxo.output.script_pubkey)
+                signature = sign(sig_hash, info.private_key)
+                tx.inputs[i].script_sig = create_p2pkh_script_sig(signature, info.public_key)
 
         # 이벤트
+        event_type = GachaEvent.WIN if payout_jack > 0 else GachaEvent.LOSE
         self.events.emit(GachaEventData(
-            event=GachaEvent.REVEAL_CREATED,  # CLAIM_CREATED 이벤트 추가 가능
+            event=event_type,
             address=pending.address,
             commit_hash=commit_hash.hex(),
-            metadata={'chosen_numbers': pending.chosen_numbers}
+            metadata={
+                'chosen_numbers': pending.chosen_numbers,
+                'result_digits': result.result_digits,
+                'matches': result.matches,
+                'prize': result.prize.name,
+                'payout_jack': payout_jack
+            }
         ))
 
         return tx, ""

@@ -29,7 +29,6 @@ from ..constants import (
     LOTTO_DIGIT_COUNT,
     LOTTO_DIGIT_BASE,
     LOTTO_COMPARISON_OFFSETS,
-    LOTTO_PRIZE_6TH_POT,
     ASSET_ID_POT,
     ASSET_ID_JACK,
     COIN,
@@ -436,12 +435,9 @@ class LottoGame:
                 block_height,
                 tx.get_txid()
             )
-        elif prize == LottoPrize.SIXTH:
-            # 6등: 1 POT 재지급
-            payout_pot = LOTTO_PRIZE_6TH_POT
         elif prize != LottoPrize.NONE:
-            # 2~5등: 고정 JACK 보상
-            payout_jack = calculate_payout(prize, commit.pool_snapshot)
+            # 2~6등: calculate_payout이 (jack, pot) 튜플 반환
+            payout_jack, payout_pot = calculate_payout(prize, commit.pool_snapshot)
 
         # 기록 업데이트
         self.store.update_claim(
@@ -452,7 +448,7 @@ class LottoGame:
             result_digits=result_digits,
             matches=matches,
             prize=prize,
-            payout=payout_jack or payout_pot
+            payout=payout_jack + payout_pot  # 총 보상 (기록용)
         )
 
         return LottoPlayResult(
@@ -460,7 +456,7 @@ class LottoGame:
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=payout_pot,
+            payout_pot=payout_pot,  # 6등: 1 POT mint
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
@@ -490,7 +486,8 @@ class LottoGame:
         self,
         commit_hash: bytes,
         chosen_numbers: List[int],
-        current_height: int
+        current_height: int,
+        commit_height: int = 0
     ) -> Optional[LottoPlayResult]:
         """
         결과 미리보기 (Claim 전)
@@ -499,6 +496,7 @@ class LottoGame:
             commit_hash: Commit 해시
             chosen_numbers: 사용자가 로컬에 저장한 6자리 숫자
             current_height: 현재 블록 높이
+            commit_height: Commit 블록 높이 (없으면 store에서 조회)
 
         Returns:
             LottoPlayResult (Claim 안 해도 결과 확인 가능)
@@ -506,16 +504,19 @@ class LottoGame:
         Note:
             숫자는 Commit에 포함되지 않으므로 사용자가 제공해야 함
         """
-        commit = self.store.get_commit(commit_hash)
-        if commit is None:
-            return None
+        # commit_height가 제공되지 않으면 store에서 조회
+        if commit_height == 0:
+            commit = self.store.get_commit(commit_hash)
+            if commit is None:
+                return None
+            commit_height = commit.commit_height
 
         # 숫자 유효성 검사
         if len(chosen_numbers) != LOTTO_DIGIT_COUNT:
             return LottoPlayResult(success=False, error="Invalid chosen_numbers length")
 
         # 비교 블록이 모두 생성되었는지 확인
-        comparison_heights = get_comparison_heights(commit.commit_height)
+        comparison_heights = get_comparison_heights(commit_height)
         if current_height < comparison_heights[-1]:
             return LottoPlayResult(
                 success=False,
@@ -542,18 +543,18 @@ class LottoGame:
         payout_jack = 0
         payout_pot = 0
         if prize == LottoPrize.JACKPOT:
-            payout_jack = self.pool.calculate_jackpot_payout(commit.commit_height)
-        elif prize == LottoPrize.SIXTH:
-            payout_pot = LOTTO_PRIZE_6TH_POT
+            payout_jack = self.pool.calculate_jackpot_payout(commit_height)
         elif prize != LottoPrize.NONE:
-            payout_jack = calculate_payout(prize, commit.pool_snapshot)
+            # 2~6등: calculate_payout이 (jack, pot) 튜플 반환
+            pool_snapshot = self.pool.balance
+            payout_jack, payout_pot = calculate_payout(prize, pool_snapshot)
 
         return LottoPlayResult(
             success=True,
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=payout_pot,
+            payout_pot=payout_pot,  # 6등: 1 POT mint
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
