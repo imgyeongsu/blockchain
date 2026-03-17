@@ -5,7 +5,8 @@
 AppName=JackpotChain
 AppVersion=1.0.0
 AppPublisher=JackpotChain Team
-AppPublisherURL=https://github.com/imgyeongsu/blockchain
+AppComments=Educational blockchain project. Commercial use and private transactions are prohibited.
+AppSupportURL=
 DefaultDirName={autopf}\JackpotChain
 DefaultGroupName=JackpotChain
 OutputDir=installer_output
@@ -14,6 +15,8 @@ Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
 ChangesEnvironment=yes
+; 설치 시 라이선스 동의 화면 표시
+LicenseFile=LICENSE_NOTICE.txt
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"

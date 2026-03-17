@@ -75,8 +75,30 @@ pyinstaller jackpotchain.spec --clean
 **사용자 경험:**
 ```
 Setup.exe 실행 → 다음 → 설치 완료
-새 터미널 열기 → jackpotchain --help
+새 터미널 열기 → jackpotchain
 ```
+
+### 2.6 TUI (Terminal User Interface)
+
+설치 후 `jackpotchain` 명령어만 입력하면 TUI가 실행됩니다.
+
+```bash
+# TUI 기본 실행 (RPC: 127.0.0.1:8332)
+jackpotchain
+
+# TUI 옵션 지정
+jackpotchain tui --rpc-host 127.0.0.1 --rpc-port 8332
+```
+
+**TUI 기능:**
+- **F1 Dashboard**: 블록체인 상태, 잭팟 풀 정보
+- **F2 Wallet**: 지갑 잔액, 주소 관리
+- **F3 Mining**: 채굴 상태 모니터링
+- **F4 Lotto**: 로또 참여 (Commit)
+- **F5 Claims**: 당첨 확인 및 수령 (Claim)
+- **F6 Network**: 피어 연결 상태
+- **Ctrl+R**: 새로고침
+- **Ctrl+Q**: 종료
 
 ## 3. RPC 메서드(현재 코드 기준)
 - Blockchain: `getblockchaininfo`, `getblock`, `getblockhash`, `getblockcount`, `getbestblockhash`

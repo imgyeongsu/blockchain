@@ -46,6 +46,11 @@ def main():
     mine_parser.add_argument('--address', required=True, help='Mining reward address')
     mine_parser.add_argument('--threads', type=int, default=1, help='Mining threads')
 
+    # tui 명령
+    tui_parser = subparsers.add_parser('tui', help='Launch Terminal UI')
+    tui_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC host')
+    tui_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
+
     args = parser.parse_args()
 
     if args.command == 'node':
@@ -54,8 +59,11 @@ def main():
         run_wallet(args)
     elif args.command == 'mine':
         run_miner(args)
+    elif args.command == 'tui':
+        run_tui(args)
     else:
-        parser.print_help()
+        # 인자 없이 실행하면 TUI 시작
+        run_tui_default()
 
 
 def run_node(args):
@@ -281,6 +289,18 @@ def run_wallet(args):
             return
         print(f"Send {args.amount} JACK to {args.to}")
         print("Use RPC: sendtoaddress")
+
+
+def run_tui(args):
+    """TUI 실행 (RPC 옵션 지정)"""
+    from ..tui.app import run_tui as start_tui
+    start_tui(host=args.rpc_host, port=args.rpc_port)
+
+
+def run_tui_default():
+    """TUI 기본 실행 (127.0.0.1:8332)"""
+    from ..tui.app import run_tui as start_tui
+    start_tui()
 
 
 def run_miner(args):
