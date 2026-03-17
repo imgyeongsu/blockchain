@@ -53,6 +53,7 @@ class WalletWidget(ScrollableContainer):
         yield Vertical(
             Horizontal(
                 Button("[+] New Wallet", id="btn-create-wallet", variant="success"),
+                Button("[+] Add Address", id="btn-add-address", variant="warning"),
                 Button("[S] Settings", id="btn-settings", variant="default"),
                 Button("[R] Refresh", id="btn-refresh", variant="primary"),
                 classes="action-buttons",
@@ -88,10 +89,6 @@ class WalletWidget(ScrollableContainer):
                 Label("Watch Only:", classes="stat-label"),
                 Input(placeholder="Address", id="watch-address"),
                 Button("Add", id="btn-add-watch", variant="primary"),
-            ),
-            Horizontal(
-                Label("Add Address:", classes="stat-label"),
-                Button("[+] New Address", id="btn-add-address", variant="success"),
             ),
             Horizontal(
                 Button("Close", id="btn-close-settings", variant="default"),
