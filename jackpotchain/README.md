@@ -172,15 +172,15 @@ jackpotchain tui --rpc-host 127.0.0.1 --rpc-port 8332
 2. ~~가챠를 Final(16-2)로 갈지 결정~~ → 완료
 3. ~~`constants`, `gacha`, `rpc`, `tests` 동기화~~ → 완료
 
-### P1 (기능 안정화)
+### P1 (기능 안정화) ✅ 완료
 1. ~~Reorg 시 UTXO disconnect/connect 구현~~ → 완료
-2. Sync 헤더 검증 및 저장 완료
+2. ~~Sync 헤더 검증 및 저장~~ → 완료
 3. ~~RPC confirmations/networkhashps 실제 계산 반영~~ → 완료
-4. 로또 통합 테스트 실행 검증
+4. ~~로또 통합 테스트 실행 검증~~ → E2E 4/4 통과 (2026-03-16)
 
 ### P2 (도메인 확장)
-1. Exchange/로또 통합 시나리오 테스트 확대
-2. Dashboard/TUI, 패키징(PyInstaller/Docker)
+1. ~~Exchange/로또 통합 시나리오 테스트~~ → E2E 통과
+2. ~~Dashboard/TUI, 패키징(PyInstaller/Docker)~~ → 완료 (2026-03-17)
 3. 다중 노드 장기 동기화 및 fork 회복 시나리오 테스트
 4. 16.1 문서의 고도화된 치트억제 로깅/모니터링
 
@@ -203,14 +203,12 @@ jackpotchain tui --rpc-host 127.0.0.1 --rpc-port 8332
 - `gacha/service.py`: `_select_pool_utxos()`, 풀 서명 스킵 로직
 - `crypto/address.py`: `JACKPOT_POOL_ADDRESS`
 
-### 7.2 Claim 데이터 온체인 검증 (P1)
-**현재 상태**: Claim TX의 OP_RETURN에 commit_hash, nonce, numbers 포함되나 검증 안 함
-
-**개선 방안**:
-- `validate_tx_scripts()`에서 LOTTO_CLAIM TX일 때 claim 데이터 파싱
-- commit_hash가 실제 commit TX에 존재하는지 확인
-- numbers + nonce로 commit_hash 재계산하여 일치 확인
-- 비교 블록 해시로 결과 계산, payout 금액 검증
+### 7.2 Claim 데이터 온체인 검증 ✅ 해결됨
+**구현 완료** (2026-03-16):
+- `validate_lotto_claim()` 함수 추가 (`validation/transaction.py`)
+- Commit 인덱스로 O(1) 조회 (`consensus/chain.py`)
+- commit_hash 재계산 검증, 타이밍 검증, payout 금액 검증
+- ADR-001 문서화 (`docs/adr/ADR-001-claim-validation.md`)
 
 ### 7.3 POT 6등 보상 UTXO 처리 ✅ 해결됨
 **해결 방안**: LOTTO_CLAIM TX에서 6등일 때 1 POT mint 허용
