@@ -181,7 +181,8 @@ class SyncManager:
         result = validate_block(
             block,
             self.blockchain.utxo_set,
-            self.blockchain.get_height() + 1
+            self.blockchain.get_height() + 1,
+            blockchain=self.blockchain
         )
 
         if result.is_valid:

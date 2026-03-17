@@ -5,15 +5,15 @@ Step 5.1: 트랜잭션 검증
 - 잔액 검증
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..core.utxo import UTXO, UTXOSet
 from ..script.interpreter import verify_script
-from ..script.standard import is_p2pkh_script_pubkey, is_op_return_script
-from ..crypto.hash import double_sha256
+from ..script.standard import is_p2pkh_script_pubkey, is_op_return_script, is_claim_script, extract_claim_data
+from ..crypto.hash import double_sha256, sha256
 from ..constants import (
     MAX_TX_SIZE,
     TX_VERSION_TRANSFER,
@@ -22,7 +22,11 @@ from ..constants import (
     TX_VERSION_REVEAL,
     TX_VERSION_LOTTO_CLAIM,
     COINBASE_MATURITY,
+    LOTTO_DIGIT_COUNT,
 )
+
+if TYPE_CHECKING:
+    from ..consensus.chain import Blockchain
 
 
 class TxValidationError(Enum):
@@ -42,6 +46,12 @@ class TxValidationError(Enum):
     INVALID_VERSION = 12
     DUST_OUTPUT = 13
     INVALID_FEE = 14
+    # Claim 검증 에러
+    INVALID_CLAIM_DATA = 15
+    INVALID_COMMIT_HASH = 16
+    COMMIT_NOT_FOUND = 17
+    INVALID_CLAIM_TIMING = 18
+    INVALID_PAYOUT = 19
 
 
 @dataclass
@@ -145,7 +155,8 @@ def is_jackpot_pool_script(script: bytes) -> bool:
 def validate_tx_scripts(
     tx: Transaction,
     utxo_set: UTXOSet,
-    current_height: int
+    current_height: int,
+    blockchain: 'Blockchain' = None
 ) -> TxValidationResult:
     """
     트랜잭션 스크립트 검증
@@ -154,10 +165,14 @@ def validate_tx_scripts(
     - 입력 UTXO 존재
     - Coinbase 성숙도
     - 서명 유효성
-    - LOTTO_CLAIM TX는 잭팟 풀에서 서명 없이 지출 허용
+    - LOTTO_CLAIM TX는 잭팟 풀에서 서명 없이 지출 허용 + claim 데이터 검증
     """
     if tx.is_coinbase():
         return TxValidationResult(is_valid=True)
+
+    # LOTTO_CLAIM TX는 별도 검증
+    is_lotto_claim = tx.version == TX_VERSION_LOTTO_CLAIM
+    lotto_claim_validated = False
 
     for idx, inp in enumerate(tx.inputs):
         # UTXO 조회
@@ -187,8 +202,13 @@ def validate_tx_scripts(
 
         # 잭팟 풀 UTXO는 LOTTO_CLAIM TX에서만 서명 없이 지출 허용
         if is_jackpot_pool_script(utxo.output.script_pubkey):
-            if tx.version == TX_VERSION_LOTTO_CLAIM:
-                # TODO: claim 데이터 검증 (commit_hash, nonce, numbers)
+            if is_lotto_claim:
+                # Claim 데이터 검증 (blockchain 있을 때만)
+                if blockchain and not lotto_claim_validated:
+                    result = validate_lotto_claim(tx, current_height, blockchain)
+                    if not result.is_valid:
+                        return result
+                    lotto_claim_validated = True
                 continue  # 서명 검증 스킵
             else:
                 return TxValidationResult(
@@ -267,10 +287,17 @@ def validate_tx_amounts(
 def validate_transaction(
     tx: Transaction,
     utxo_set: UTXOSet,
-    current_height: int
+    current_height: int,
+    blockchain: 'Blockchain' = None
 ) -> TxValidationResult:
     """
     전체 트랜잭션 검증 (통합)
+
+    Args:
+        tx: 검증할 트랜잭션
+        utxo_set: UTXO Set
+        current_height: 현재 블록 높이
+        blockchain: Blockchain 참조 (LOTTO_CLAIM 검증용, optional)
     """
     # 1. 구조 검증
     result = validate_tx_structure(tx)
@@ -282,7 +309,7 @@ def validate_transaction(
         return TxValidationResult(is_valid=True)
 
     # 2. 스크립트 검증
-    result = validate_tx_scripts(tx, utxo_set, current_height)
+    result = validate_tx_scripts(tx, utxo_set, current_height, blockchain)
     if not result.is_valid:
         return result
 
@@ -363,5 +390,122 @@ def validate_coinbase(
             error=TxValidationError.INVALID_SCRIPT,
             message=f"Coinbase height {encoded_height} != block height {block_height}"
         )
+
+    return TxValidationResult(is_valid=True)
+
+
+def validate_lotto_claim(
+    tx: Transaction,
+    current_height: int,
+    blockchain: 'Blockchain'
+) -> TxValidationResult:
+    """
+    LOTTO_CLAIM TX 검증
+
+    검증 항목:
+    1. claim script 파싱 (commit_hash, nonce, chosen_numbers)
+    2. SHA256(nonce + numbers) == commit_hash (위조 방지)
+    3. commit TX 존재 확인 (인덱스 조회)
+    4. claim 타이밍 검증 (N+18 ~ N+68)
+    5. prize 계산 및 payout 검증
+    """
+    from ..gacha.commit_reveal import (
+        is_claim_valid,
+        get_comparison_heights,
+        calculate_result_digits,
+        count_matches,
+        determine_prize,
+        calculate_payout,
+    )
+
+    # 1. Claim script 찾기 및 파싱
+    claim_data = None
+    for output in tx.outputs:
+        if is_claim_script(output.script_pubkey):
+            claim_data = extract_claim_data(output.script_pubkey)
+            break
+
+    if claim_data is None:
+        return TxValidationResult(
+            is_valid=False,
+            error=TxValidationError.INVALID_CLAIM_DATA,
+            message="No valid claim script in outputs"
+        )
+
+    commit_hash, nonce, chosen_numbers = claim_data
+
+    # 2. commit_hash 검증: SHA256(nonce + numbers) == commit_hash
+    numbers_bytes = bytes(chosen_numbers)
+    expected_hash = sha256(nonce + numbers_bytes)
+
+    if expected_hash != commit_hash:
+        return TxValidationResult(
+            is_valid=False,
+            error=TxValidationError.INVALID_COMMIT_HASH,
+            message="Commit hash mismatch: nonce + numbers doesn't match"
+        )
+
+    # 3. Commit TX 존재 확인
+    commit_info = blockchain.get_commit_info(commit_hash)
+    if commit_info is None:
+        return TxValidationResult(
+            is_valid=False,
+            error=TxValidationError.COMMIT_NOT_FOUND,
+            message="Commit TX not found in blockchain"
+        )
+
+    commit_height = commit_info.block_height
+
+    # 4. Claim 타이밍 검증 (N+18 ~ N+68)
+    valid, reason = is_claim_valid(commit_height, current_height)
+    if not valid:
+        return TxValidationResult(
+            is_valid=False,
+            error=TxValidationError.INVALID_CLAIM_TIMING,
+            message=f"Invalid claim timing: {reason}"
+        )
+
+    # 5. Prize 계산
+    comparison_heights = get_comparison_heights(commit_height)
+
+    # 비교 블록 해시 수집
+    block_hashes = []
+    for h in comparison_heights:
+        block = blockchain.get_block_by_height(h)
+        if block:
+            block_hashes.append(block.get_hash())
+        else:
+            return TxValidationResult(
+                is_valid=False,
+                error=TxValidationError.INVALID_CLAIM_DATA,
+                message=f"Comparison block at height {h} not found"
+            )
+
+    # 당첨 결과 계산
+    result_digits = calculate_result_digits(block_hashes)
+    matches = count_matches(chosen_numbers, result_digits)
+    prize = determine_prize(matches)
+
+    # 6. Payout 검증
+    # 현재는 pool_snapshot을 알 수 없으므로 1등만 제외하고 검증
+    # (1등은 pool의 50%이므로 snapshot 없이는 정확한 금액 검증 불가)
+    expected_payout = calculate_payout(prize, pool_snapshot=0)
+
+    # TX에서 실제 payout 추출 (pool UTXO에서 나가는 금액)
+    actual_payout = 0
+    for output in tx.outputs:
+        # OP_RETURN과 JACKPOT_POOL 제외한 일반 output이 payout
+        if not is_op_return_script(output.script_pubkey) and output.script_pubkey != b'JACKPOT_POOL':
+            actual_payout += output.jack_value
+
+    # 수수료 제외한 순수 payout 비교 (대략적 검증)
+    # TODO: 더 정확한 payout 검증 필요 (1등 pool snapshot 포함)
+    if prize.value > 0 and prize.value < 6:  # 2~5등 고정 금액
+        if actual_payout < expected_payout:
+            return TxValidationResult(
+                is_valid=False,
+                error=TxValidationError.INVALID_PAYOUT,
+                message=f"Payout mismatch: expected >= {expected_payout}, got {actual_payout}"
+            )
 
     return TxValidationResult(is_valid=True)

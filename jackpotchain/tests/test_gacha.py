@@ -182,9 +182,10 @@ class TestPayoutCalculation:
         assert payout == LOTTO_PRIZE_5TH
 
     def test_sixth_payout(self):
-        """6등: 0 JACK (POT 별도 처리)"""
+        """6등: 100 JACK (참가비 환불)"""
+        from ..constants import LOTTO_PRIZE_6TH_JACK
         payout = calculate_payout(LottoPrize.SIXTH, 0)
-        assert payout == 0
+        assert payout == LOTTO_PRIZE_6TH_JACK
 
     def test_none_payout(self):
         """꽝: 0"""
