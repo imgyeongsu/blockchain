@@ -9,7 +9,20 @@ import argparse
 import asyncio
 import time
 import sys
+import os
 from pathlib import Path
+
+
+def get_default_data_dir() -> str:
+    """기본 데이터 디렉토리 (%APPDATA%/JackpotChain/data)"""
+    appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    return os.path.join(appdata, 'JackpotChain', 'data')
+
+
+def get_default_wallet_file() -> str:
+    """기본 지갑 파일 (%APPDATA%/JackpotChain/wallets/default.json)"""
+    appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+    return os.path.join(appdata, 'JackpotChain', 'wallets', 'default.json')
 
 
 def main():
@@ -24,8 +37,8 @@ def main():
     node_parser = subparsers.add_parser('node', help='Run a node')
     node_parser.add_argument('--port', type=int, default=8333, help='P2P port')
     node_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
-    node_parser.add_argument('--data-dir', default='./data', help='Data directory')
-    node_parser.add_argument('--wallet-file', default='./wallet.json', help='Wallet file path')
+    node_parser.add_argument('--data-dir', default=None, help='Data directory (default: %%APPDATA%%/JackpotChain/data)')
+    node_parser.add_argument('--wallet-file', default=None, help='Wallet file path (default: %%APPDATA%%/JackpotChain/wallets/default.json)')
     node_parser.add_argument('--seed', action='append', help='Seed node (ip:port)')
     # 채굴 통합 옵션
     node_parser.add_argument('--mine', action='store_true', help='Enable mining')
@@ -38,7 +51,7 @@ def main():
     # wallet 명령
     wallet_parser = subparsers.add_parser('wallet', help='Wallet operations')
     wallet_parser.add_argument('action', choices=['create', 'balance', 'address', 'send'])
-    wallet_parser.add_argument('--wallet-file', default='./wallet.json')
+    wallet_parser.add_argument('--wallet-file', default=None, help='Wallet file path')
     wallet_parser.add_argument('--to', help='Recipient address (for send)')
     wallet_parser.add_argument('--amount', type=float, help='Amount (for send)')
 
@@ -80,14 +93,24 @@ def run_node(args):
         print("Error: --address required when --mine is enabled")
         sys.exit(1)
 
+    # 기본 경로 설정
+    data_dir = args.data_dir or get_default_data_dir()
+    wallet_file = args.wallet_file or get_default_wallet_file()
+
+    # 지갑 디렉토리 생성
+    wallet_dir = os.path.dirname(wallet_file)
+    if wallet_dir:
+        os.makedirs(wallet_dir, exist_ok=True)
+
     print(f"Starting JackpotChain node on port {args.port}...")
-    print(f"Data directory: {args.data_dir}")
+    print(f"Data directory: {data_dir}")
+    print(f"Wallet file: {wallet_file}")
 
     # 초기화 (영구 저장 활성화)
-    blockchain = Blockchain(data_dir=args.data_dir)
+    blockchain = Blockchain(data_dir=data_dir)
     mempool = Mempool()
     # 지갑 파일 로드
-    wallet = Wallet(args.wallet_file)
+    wallet = Wallet(wallet_file)
 
     config = NodeConfig(
         port=args.port,
@@ -266,7 +289,14 @@ def run_wallet(args):
     from ..wallet.wallet import Wallet
     from ..consensus.chain import Blockchain
 
-    wallet = Wallet(args.wallet_file)
+    wallet_file = args.wallet_file or get_default_wallet_file()
+
+    # 지갑 디렉토리 생성
+    wallet_dir = os.path.dirname(wallet_file)
+    if wallet_dir:
+        os.makedirs(wallet_dir, exist_ok=True)
+
+    wallet = Wallet(wallet_file)
 
     if args.action == 'create':
         address = wallet.generate_address()
@@ -315,7 +345,8 @@ def run_miner(args):
     print(f"[WARNING] Standalone mining. Use 'node --mine' for integrated mining.")
     print(f"Starting miner. Reward address: {args.address}")
 
-    blockchain = Blockchain()
+    data_dir = get_default_data_dir()
+    blockchain = Blockchain(data_dir=data_dir)
     mempool = Mempool()
 
     def mining_callback(nonce, hash_count):
