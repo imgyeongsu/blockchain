@@ -13,6 +13,7 @@ jp-aws/
 build/
 installer_output/
 *.log
+*.egg-info/
 
 # ── Frontend (Node.js) ────────────────────────────────────
 node_modules/

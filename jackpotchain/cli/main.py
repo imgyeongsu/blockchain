@@ -82,11 +82,11 @@ def main():
 
 def run_node(args):
     """노드 실행 (채굴 통합 지원)"""
-    from ..consensus.chain import Blockchain
-    from ..network.node import Node, NodeConfig
-    from ..rpc.server import RPCServer
-    from ..mempool.pool import Mempool
-    from ..wallet.wallet import Wallet
+    from jackpotchain.consensus.chain import Blockchain
+    from jackpotchain.network.node import Node, NodeConfig
+    from jackpotchain.rpc.server import RPCServer
+    from jackpotchain.mempool.pool import Mempool
+    from jackpotchain.wallet.wallet import Wallet
 
     # 채굴 옵션 검증
     if args.mine and not args.address:
@@ -122,7 +122,7 @@ def run_node(args):
 
     # 시드 노드 추가
     if args.seed:
-        from ..network.peer import PeerAddress
+        from jackpotchain.network.peer import PeerAddress
         seeds = []
         for seed in args.seed:
             ip, port = seed.split(':')
@@ -148,9 +148,9 @@ def run_node(args):
 
     async def mining_task():
         """백그라운드 채굴 태스크"""
-        from ..consensus.miner import create_block_template, mine_block
-        from ..consensus.difficulty import get_next_difficulty
-        from ..script.standard import get_address_from_script_pubkey
+        from jackpotchain.consensus.miner import create_block_template, mine_block
+        from jackpotchain.consensus.difficulty import get_next_difficulty
+        from jackpotchain.script.standard import get_address_from_script_pubkey
 
         print(f"Mining enabled. Reward address: {args.address}")
         mining_stats['is_mining'] = True
@@ -286,8 +286,8 @@ def run_node(args):
 
 def run_wallet(args):
     """지갑 작업"""
-    from ..wallet.wallet import Wallet
-    from ..consensus.chain import Blockchain
+    from jackpotchain.wallet.wallet import Wallet
+    from jackpotchain.consensus.chain import Blockchain
 
     wallet_file = args.wallet_file or get_default_wallet_file()
 
@@ -336,11 +336,11 @@ def run_tui_default():
 
 def run_miner(args):
     """독립 채굴 실행 (레거시, node --mine 권장)"""
-    from ..consensus.chain import Blockchain
-    from ..consensus.miner import create_block_template, mine_block
-    from ..consensus.difficulty import get_next_difficulty
-    from ..mempool.pool import Mempool
-    from ..script.standard import get_address_from_script_pubkey
+    from jackpotchain.consensus.chain import Blockchain
+    from jackpotchain.consensus.miner import create_block_template, mine_block
+    from jackpotchain.consensus.difficulty import get_next_difficulty
+    from jackpotchain.mempool.pool import Mempool
+    from jackpotchain.script.standard import get_address_from_script_pubkey
 
     print(f"[WARNING] Standalone mining. Use 'node --mine' for integrated mining.")
     print(f"Starting miner. Reward address: {args.address}")

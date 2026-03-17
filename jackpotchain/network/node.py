@@ -33,8 +33,8 @@ class NodeConfig:
     host: str = "0.0.0.0"
     port: int = DEFAULT_PORT
     user_agent: str = "/JackpotChain:0.1.0/"
-    max_outbound: int = 6
-    max_inbound: int = 2
+    max_outbound: int = 8
+    max_inbound: int = 32
     relay: bool = True
     data_dir: str = None  # 피어 캐시 저장 경로
     discovery_interval: int = 1800  # 피어 발견 주기 (30분)
@@ -104,6 +104,9 @@ class Node:
         # 순차 블록 동기화용
         self._pending_blocks: List[bytes] = []  # 대기 중인 블록 해시 목록
         self._sync_peer: Optional[PeerAddress] = None  # 동기화 중인 피어
+        self._requesting: set = set()  # 현재 요청 중인 블록 해시
+        self._block_buffer: Dict[bytes, Block] = {}  # 순서 대기 중인 블록
+        self._batch_size: int = 16  # 동시 요청 블록 수
 
     @property
     def height(self) -> int:
@@ -439,15 +442,29 @@ class Node:
             await self._request_next_block()
 
     async def _request_next_block(self):
-        """대기 중인 다음 블록 요청"""
+        """대기 중인 다음 블록들 요청 (배치)"""
         if not self._pending_blocks or not self._sync_peer:
             return
 
-        # 첫 번째 블록 요청
-        block_hash = self._pending_blocks[0]
-        item = InvItem(InvType.BLOCK, block_hash)
-        getdata = GetDataMessage(items=[item])
-        print(f"[SYNC] GETDATA 요청: 1개 블록 (대기: {len(self._pending_blocks)}개)")
+        # 요청 안 한 것 중 최대 batch_size개 선택
+        to_request = []
+        for block_hash in self._pending_blocks:
+            if block_hash not in self._requesting and block_hash not in self._block_buffer:
+                to_request.append(block_hash)
+                if len(to_request) >= self._batch_size:
+                    break
+
+        if not to_request:
+            return
+
+        # 요청 중 표시
+        for h in to_request:
+            self._requesting.add(h)
+
+        # 여러 블록 한번에 요청
+        items = [InvItem(InvType.BLOCK, h) for h in to_request]
+        getdata = GetDataMessage(items=items)
+        print(f"[SYNC] GETDATA 요청: {len(items)}개 블록 (대기: {len(self._pending_blocks)}개)")
         await self._send_message(self._sync_peer, MessageType.GETDATA, getdata.serialize())
 
     async def _handle_getdata(self, address: PeerAddress, payload: bytes):
@@ -472,34 +489,67 @@ class Node:
         peer = self.peer_manager.get_peer(address)
         block_hash = block.get_hash()
 
-        # [SYNC-LOG] BLOCK 수신
-        print(f"[SYNC] BLOCK 수신: hash={block_hash.hex()[:16]}... from {address.ip}:{address.port}")
+        # 요청 목록에서 제거
+        self._requesting.discard(block_hash)
 
-        # 이전 블록이 없으면 동기화 요청
+        # 이전 블록이 없으면 버퍼에 저장
         prev_hash = block.header.prev_block_hash
         if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
-            # 이전 블록들이 필요함 - GETBLOCKS 요청
-            print(f"[SYNC] 이전 블록 없음, GETBLOCKS 요청 (prev={prev_hash.hex()[:16]}...)")
-            await self._request_blocks(address)
+            # 버퍼에 저장 (나중에 처리)
+            if block_hash in self._pending_blocks:
+                self._block_buffer[block_hash] = block
+            else:
+                # 동기화 목록에 없는 블록 - GETBLOCKS 요청
+                print(f"[SYNC] 이전 블록 없음, GETBLOCKS 요청 (prev={prev_hash.hex()[:16]}...)")
+                await self._request_blocks(address)
             return
 
-        # 콜백 호출 (블록 체인에 추가)
+        # 블록 처리
         if self._on_block:
             self._on_block(block, peer)
 
-        # 순차 동기화: 처리된 블록 제거 후 다음 블록 요청
+        # 다른 피어들에게 재전파 (보낸 피어 제외)
+        await self._relay_block(block, exclude=address)
+
+        # 처리된 블록 제거
         if block_hash in self._pending_blocks:
             self._pending_blocks.remove(block_hash)
-            if self._pending_blocks:
-                await self._request_next_block()
-            else:
-                print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
-                self._sync_peer = None
+
+        # 버퍼에서 연결 가능한 블록들 처리
+        processed = True
+        while processed:
+            processed = False
+            for buf_hash, buf_block in list(self._block_buffer.items()):
+                if self.blockchain.has_block(buf_block.header.prev_block_hash):
+                    if self._on_block:
+                        self._on_block(buf_block, peer)
+                    # 재전파
+                    await self._relay_block(buf_block, exclude=address)
+                    del self._block_buffer[buf_hash]
+                    if buf_hash in self._pending_blocks:
+                        self._pending_blocks.remove(buf_hash)
+                    processed = True
+                    break
+
+        # 다음 배치 요청
+        if self._pending_blocks:
+            await self._request_next_block()
+        else:
+            print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
+            self._sync_peer = None
+            self._block_buffer.clear()
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
         """TX 수신"""
         tx, _ = Transaction.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
+
+        # mempool에 추가
+        if self.mempool and not self.mempool.has_tx(tx.get_txid()):
+            added = self.mempool.add_tx(tx)
+            if added:
+                # 다른 피어에게 재전파
+                await self._relay_tx(tx, exclude=address)
 
         if self._on_tx:
             self._on_tx(tx, peer)
@@ -753,3 +803,28 @@ class Node:
 
         for addr in list(self._connections.keys()):
             await self._send_message(addr, MessageType.INV, payload)
+
+    async def _relay_block(self, block: Block, exclude: PeerAddress = None):
+        """블록 재전파 (수신한 피어 제외)"""
+        item = InvItem(InvType.BLOCK, block.get_hash())
+        inv = InvMessage([item])
+        payload = inv.serialize()
+
+        relayed = 0
+        for addr in list(self._connections.keys()):
+            if addr != exclude:
+                await self._send_message(addr, MessageType.INV, payload)
+                relayed += 1
+
+        if relayed > 0:
+            print(f"[RELAY] 블록 {block.get_hash().hex()[:16]}... → {relayed}개 피어")
+
+    async def _relay_tx(self, tx: Transaction, exclude: PeerAddress = None):
+        """TX 재전파 (수신한 피어 제외)"""
+        item = InvItem(InvType.TX, tx.get_txid())
+        inv = InvMessage([item])
+        payload = inv.serialize()
+
+        for addr in list(self._connections.keys()):
+            if addr != exclude:
+                await self._send_message(addr, MessageType.INV, payload)
