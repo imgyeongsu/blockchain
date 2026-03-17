@@ -6,17 +6,19 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 
-# textual과 rich의 모든 데이터/모듈 수집
+# 모든 데이터/모듈 수집
 textual_datas, textual_binaries, textual_hiddenimports = collect_all('textual')
 rich_datas, rich_binaries, rich_hiddenimports = collect_all('rich')
+aiohttp_datas, aiohttp_binaries, aiohttp_hiddenimports = collect_all('aiohttp')
+ecdsa_datas, ecdsa_binaries, ecdsa_hiddenimports = collect_all('ecdsa')
 
 a = Analysis(
     ['cli/main.py'],
     pathex=[],
-    binaries=textual_binaries + rich_binaries,
+    binaries=textual_binaries + rich_binaries + aiohttp_binaries + ecdsa_binaries,
     datas=[
         ('tui/styles.tcss', 'jackpotchain/tui'),
-    ] + textual_datas + rich_datas,
+    ] + textual_datas + rich_datas + aiohttp_datas + ecdsa_datas,
     hiddenimports=[
         'jackpotchain',
         'jackpotchain.core',
@@ -42,11 +44,9 @@ a = Analysis(
         'jackpotchain.tui.widgets.claims',
         'jackpotchain.tui.widgets.network',
         'asyncio',
-        'aiohttp',
         'json',
         'hashlib',
-        'ecdsa',
-    ] + textual_hiddenimports + rich_hiddenimports,
+    ] + textual_hiddenimports + rich_hiddenimports + aiohttp_hiddenimports + ecdsa_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
