@@ -156,6 +156,11 @@ class WalletWidget(ScrollableContainer):
             watch_only = wallet._watch_only
             total_addresses += len(addresses) + len(watch_only)
 
+            # 선택된 지갑 표시
+            is_selected = (self.app.current_wallet_file and
+                          self.app.current_wallet_file.stem == wallet_name)
+            prefix = "[*]" if is_selected else "[ ]"
+
             # 지갑 잔액 합계
             if self._node_connected:
                 wallet_total = sum(
@@ -166,9 +171,9 @@ class WalletWidget(ScrollableContainer):
                     self._balances.get(addr, 0) or 0
                     for addr in watch_only
                 )
-                header_text = f"[{wallet_name}.json] ({len(addresses)} addr) - {wallet_total:,.2f} JACK"
+                header_text = f"{prefix} {wallet_name}.json ({len(addresses)} addr) - {wallet_total:,.2f} JACK"
             else:
-                header_text = f"[{wallet_name}.json] ({len(addresses)} addr) - -- JACK"
+                header_text = f"{prefix} {wallet_name}.json ({len(addresses)} addr) - -- JACK"
             header_item = ListItem(Label(header_text))
             header_item.data = {"type": "wallet", "name": wallet_name}
             list_view.append(header_item)
@@ -283,7 +288,25 @@ class WalletWidget(ScrollableContainer):
 
         data = item.data
 
-        if data.get("type") == "address":
+        if data.get("type") == "wallet":
+            # 지갑 헤더 클릭 → 지갑 선택
+            wallet_name = data["name"]
+            if wallet_name in self._wallets:
+                self.app.current_wallet = self._wallets[wallet_name]
+                wallet_path = self.app.wallet_dir / f"{wallet_name}.json"
+                self.app.current_wallet_file = wallet_path
+
+                # 첫 번째 주소 자동 선택
+                addresses = self._wallets[wallet_name].get_addresses()
+                if addresses:
+                    self.app.selected_address = addresses[0]
+
+                self.query_one("#wallet-status", Label).update(
+                    f"Wallet: {wallet_name}.json selected"
+                )
+                self._update_wallet_list()
+
+        elif data.get("type") == "address":
             addr = data["address"]
             wallet_name = data["wallet"]
 
