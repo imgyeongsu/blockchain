@@ -2,16 +2,21 @@
 """
 JackpotChain PyInstaller Spec File
 """
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
+
+# textual과 rich의 모든 데이터/모듈 수집
+textual_datas, textual_binaries, textual_hiddenimports = collect_all('textual')
+rich_datas, rich_binaries, rich_hiddenimports = collect_all('rich')
 
 a = Analysis(
     ['cli/main.py'],
     pathex=[],
-    binaries=[],
+    binaries=textual_binaries + rich_binaries,
     datas=[
         ('tui/styles.tcss', 'jackpotchain/tui'),
-    ],
+    ] + textual_datas + rich_datas,
     hiddenimports=[
         'jackpotchain',
         'jackpotchain.core',
@@ -41,12 +46,7 @@ a = Analysis(
         'json',
         'hashlib',
         'ecdsa',
-        'textual',
-        'textual.app',
-        'textual.widgets',
-        'textual.containers',
-        'rich',
-    ],
+    ] + textual_hiddenimports + rich_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

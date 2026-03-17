@@ -25,6 +25,7 @@ def main():
     node_parser.add_argument('--port', type=int, default=8333, help='P2P port')
     node_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
     node_parser.add_argument('--data-dir', default='./data', help='Data directory')
+    node_parser.add_argument('--wallet-file', default='./wallet.json', help='Wallet file path')
     node_parser.add_argument('--seed', action='append', help='Seed node (ip:port)')
     # 채굴 통합 옵션
     node_parser.add_argument('--mine', action='store_true', help='Enable mining')
@@ -85,8 +86,8 @@ def run_node(args):
     # 초기화 (영구 저장 활성화)
     blockchain = Blockchain(data_dir=args.data_dir)
     mempool = Mempool()
-    # TODO: --wallet 옵션으로 지갑 파일 분리 지원
-    wallet = Wallet("wallet.json")
+    # 지갑 파일 로드
+    wallet = Wallet(args.wallet_file)
 
     config = NodeConfig(
         port=args.port,
