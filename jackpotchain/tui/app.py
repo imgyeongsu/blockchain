@@ -4,6 +4,7 @@ JackpotChain TUI Main Application
 textual 기반 메인 앱 (ContentSwitcher 방식)
 """
 
+import os
 from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -38,12 +39,15 @@ class JackpotChainApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8332, wallet_dir: str = "./wallets"):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8332, wallet_dir: str = None):
         super().__init__()
         self.rpc = RPCClient(host, port)
         self._current_tab = "dashboard"
 
-        # 지갑 상태
+        # 지갑 상태 - %APPDATA%\JackpotChain\wallets 고정
+        if wallet_dir is None:
+            appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+            wallet_dir = os.path.join(appdata, 'JackpotChain', 'wallets')
         self.wallet_dir = Path(wallet_dir)
         self.wallet_dir.mkdir(parents=True, exist_ok=True)
         self.current_wallet: Wallet | None = None
