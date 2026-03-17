@@ -45,6 +45,39 @@ python -m jackpotchain.cli.main wallet balance
 python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 ```
 
+### 2.5 설치 파일 빌드 (Windows)
+
+일반 사용자 배포용 설치 프로그램 생성 방법:
+
+**사전 준비:**
+- [Inno Setup](https://jrsoftware.org/isdl.php) 설치
+
+**빌드 순서:**
+```bash
+# 1단계: Python → EXE 변환 (PyInstaller)
+cd jackpotchain
+.venv\Scripts\activate
+pip install pyinstaller
+pyinstaller jackpotchain.spec --clean
+# 결과: dist/jackpotchain.exe (약 12MB)
+
+# 2단계: EXE → 설치 프로그램 (Inno Setup)
+# Inno Setup Compiler 실행 → installer.iss 열기 → Build > Compile (Ctrl+F9)
+# 결과: installer_output/JackpotChain-Setup-1.0.0.exe
+```
+
+**설치 프로그램 기능:**
+- 설치 경로 선택 (기본: `C:\Program Files\JackpotChain`)
+- PATH 환경변수 자동 등록
+- 시작 메뉴 바로가기 생성
+- 제어판에서 프로그램 제거 지원
+
+**사용자 경험:**
+```
+Setup.exe 실행 → 다음 → 설치 완료
+새 터미널 열기 → jackpotchain --help
+```
+
 ## 3. RPC 메서드(현재 코드 기준)
 - Blockchain: `getblockchaininfo`, `getblock`, `getblockhash`, `getblockcount`, `getbestblockhash`
 - Mempool: `getmempoolinfo`, `getrawmempool`, `sendrawtransaction`
