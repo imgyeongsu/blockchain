@@ -9,6 +9,11 @@ data/
 wallet.json
 jp-aws/
 
+# ── Build Artifacts ────────────────────────────────────────
+build/
+installer_output/
+*.log
+
 # ── Frontend (Node.js) ────────────────────────────────────
 node_modules/
 dist/
