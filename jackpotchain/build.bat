@@ -7,8 +7,7 @@ echo.
 cd /d "%~dp0"
 
 echo [1/2] PyInstaller: Python → EXE
-call .venv\Scripts\activate
-pyinstaller jackpotchain.spec --clean
+.venv\Scripts\pyinstaller.exe jackpotchain.spec --clean
 if errorlevel 1 (
     echo PyInstaller failed!
     pause
