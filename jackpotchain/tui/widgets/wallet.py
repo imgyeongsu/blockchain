@@ -1,62 +1,60 @@
 """
 Wallet Widget
 
-지갑 화면 - 로컬 파일 기반 + RPC 연동
+다중 지갑 통합 뷰 - 모든 지갑 파일을 한 화면에서 조회
 """
 
 from pathlib import Path
+from typing import Dict, List, Optional
 
 from textual.app import ComposeResult
 from textual.widgets import Static, Label, Input, Button, ListView, ListItem
 from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
+from ...wallet.wallet import Wallet
 
 
 class WalletWidget(ScrollableContainer):
-    """지갑 위젯 (로컬 파일 + RPC 연동)"""
+    """다중 지갑 통합 위젯"""
 
     can_focus = False
 
     def __init__(self, rpc: RPCClient, **kwargs):
         super().__init__(**kwargs)
         self.rpc = rpc
+        # 로드된 지갑들: {파일명: Wallet}
+        self._wallets: Dict[str, Wallet] = {}
+        # 주소별 잔액 캐시: {주소: 잔액}
+        self._balances: Dict[str, float] = {}
+        # 주소 → 지갑 매핑: {주소: 파일명}
+        self._addr_to_wallet: Dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
-        # 지갑 상태에 따라 다른 UI
+        # 총 잔액 헤더
         yield Vertical(
-            # 지갑 정보 헤더
-            Label("MY WALLET", classes="box-title", id="wallet-title"),
-            Label("[Balance] -- JACK", id="total-balance", classes="stat-value green"),
+            Label("ALL WALLETS", classes="box-title"),
+            Label("Total: -- JACK", id="total-balance", classes="stat-value green"),
+            Label("Wallets: 0 | Addresses: 0", id="wallet-stats", classes="stat-value"),
             classes="stat-box",
-            id="wallet-header",
         )
 
-        # 주소 목록
+        # 지갑 목록 (스크롤 가능)
         yield Vertical(
-            Label("ADDRESSES", classes="box-title"),
-            ListView(id="address-list"),
+            Label("WALLET LIST", classes="box-title"),
+            ListView(id="wallet-list"),
+            classes="stat-box",
+            id="wallet-list-section",
+        )
+
+        # 액션 버튼
+        yield Vertical(
             Horizontal(
-                Button("[+] Add Address", id="btn-add-address", variant="success"),
-                Button("[W] Switch Wallet", id="btn-switch-wallet", variant="primary"),
-                Button("[S] Settings", id="btn-advanced", variant="default"),
+                Button("[+] New Wallet", id="btn-create-wallet", variant="success"),
+                Button("[R] Refresh", id="btn-refresh", variant="primary"),
                 classes="action-buttons",
             ),
             classes="stat-box",
-            id="address-section",
-        )
-
-        # 지갑 없을 때 표시
-        yield Vertical(
-            Label("NO WALLET", classes="box-title"),
-            Label("Create a new wallet or load an existing one.", id="no-wallet-msg"),
-            Horizontal(
-                Button("[N] New Wallet", id="btn-create-wallet", variant="success"),
-                Button("[L] Load Wallet", id="btn-load-wallet", variant="primary"),
-                classes="action-buttons",
-            ),
-            classes="stat-box",
-            id="no-wallet-section",
         )
 
         # 지갑 생성 패널 (숨김)
@@ -75,203 +73,170 @@ class WalletWidget(ScrollableContainer):
             id="create-wallet-panel",
         )
 
-        # 지갑 선택 패널 (숨김)
-        yield Vertical(
-            Label("SELECT WALLET", classes="box-title"),
-            ListView(id="wallet-file-list"),
-            Horizontal(
-                Button("Select", id="btn-confirm-load", variant="success"),
-                Button("Cancel", id="btn-cancel-load", variant="error"),
-                classes="action-buttons",
-            ),
-            classes="stat-box hidden",
-            id="load-wallet-panel",
-        )
-
-        # 고급 설정 패널 (숨김)
-        yield Vertical(
-            Label("ADVANCED SETTINGS", classes="box-title"),
-            Horizontal(
-                Label("Import Key:", classes="stat-label"),
-                Input(placeholder="Private key (hex)", id="import-privkey"),
-                Button("Import", id="btn-import-key", variant="warning"),
-            ),
-            Horizontal(
-                Label("Watch Only:", classes="stat-label"),
-                Input(placeholder="Address (receive only)", id="watch-address"),
-                Button("Add", id="btn-add-watch", variant="primary"),
-            ),
-            Horizontal(
-                Button("Close", id="btn-close-advanced", variant="default"),
-                classes="action-buttons",
-            ),
-            classes="stat-box hidden",
-            id="advanced-panel",
-        )
-
         # 상태 메시지
         yield Label("", id="wallet-status", classes="status-msg")
 
     def on_mount(self) -> None:
         """마운트 시"""
+        self._load_all_wallets()
         self.refresh_data()
-        self.set_interval(5, self._update_balance)
+        self.set_interval(10, self._periodic_refresh)
+
+    def _load_all_wallets(self) -> None:
+        """모든 지갑 파일 로드"""
+        self._wallets.clear()
+        self._addr_to_wallet.clear()
+
+        wallet_files = self.app.get_wallet_files()
+        for wf in wallet_files:
+            try:
+                wallet = Wallet(str(wf))
+                wallet_name = wf.stem
+                self._wallets[wallet_name] = wallet
+
+                # 주소 매핑
+                for addr in wallet.get_addresses():
+                    self._addr_to_wallet[addr] = wallet_name
+                for addr in wallet._watch_only:
+                    self._addr_to_wallet[addr] = wallet_name
+
+            except Exception as e:
+                pass  # 로드 실패한 지갑은 무시
 
     def refresh_data(self) -> None:
         """데이터 새로고침"""
-        self._update_ui()
+        self._load_all_wallets()
+        self._update_wallet_list()
+        self.run_worker(self._load_all_balances())
 
-    def _update_ui(self) -> None:
-        """UI 상태 업데이트"""
-        app = self.app
+    def _periodic_refresh(self) -> None:
+        """주기적 새로고침 (잔액만)"""
+        self.run_worker(self._load_all_balances())
 
-        has_wallet = app.current_wallet is not None
-
-        # 섹션 표시/숨김
-        self.query_one("#wallet-header").set_class(not has_wallet, "hidden")
-        self.query_one("#address-section").set_class(not has_wallet, "hidden")
-        self.query_one("#no-wallet-section").set_class(has_wallet, "hidden")
-
-        if has_wallet:
-            # 지갑 파일명 표시
-            wallet_name = app.current_wallet_file.stem if app.current_wallet_file else "Unknown"
-            self.query_one("#wallet-title", Label).update(f"내 지갑: {wallet_name}.json")
-
-            # 주소 목록 업데이트
-            self._update_address_list()
-
-            # 잔액 업데이트
-            self.run_worker(self._load_balance())
-
-    def _update_address_list(self) -> None:
-        """주소 목록 업데이트"""
-        app = self.app
-        if not app.current_wallet:
-            return
-
-        list_view = self.query_one("#address-list", ListView)
+    def _update_wallet_list(self) -> None:
+        """지갑 목록 UI 업데이트"""
+        list_view = self.query_one("#wallet-list", ListView)
         list_view.clear()
 
-        addresses = app.current_wallet.get_addresses()
-        watch_only = app.current_wallet._watch_only
-
-        for addr in addresses:
-            info = app.current_wallet._addresses.get(addr)
-            label = info.label if info and info.label else ""
-
-            # 선택된 주소 표시
-            prefix = "[*] " if addr == app.selected_address else "[ ] "
-            display = f"{prefix}{addr[:12]}...{addr[-6:]}"
-            if label:
-                display += f" ({label})"
-
-            item = ListItem(Label(display))
-            item.data = addr  # 전체 주소 저장
-            list_view.append(item)
-
-        # Watch-only 주소
-        for addr in watch_only:
-            display = f"[W] {addr[:12]}...{addr[-6:]} (watch)"
-            item = ListItem(Label(display))
-            item.data = addr
-            list_view.append(item)
-
-    async def _load_balance(self) -> None:
-        """잔액 로드 (RPC)"""
-        app = self.app
-        if not app.selected_address:
-            self.query_one("#total-balance", Label).update("[Balance] 0 JACK")
+        if not self._wallets:
+            list_view.append(ListItem(Label("(No wallets found)")))
+            self.query_one("#wallet-stats", Label).update("Wallets: 0 | Addresses: 0")
             return
 
-        resp = await self.rpc.get_balance(app.selected_address)
-        if resp.success:
-            balance = resp.result or 0
-            self.query_one("#total-balance", Label).update(f"[Balance] {balance:,.2f} JACK")
-        else:
-            self.query_one("#total-balance", Label).update("[Balance] -- (node required)")
+        total_addresses = 0
 
-    def _update_balance(self) -> None:
-        """주기적 잔액 업데이트"""
-        if self.app.current_wallet:
-            self.run_worker(self._load_balance())
+        for wallet_name, wallet in self._wallets.items():
+            # 지갑 헤더
+            addresses = wallet.get_addresses()
+            watch_only = wallet._watch_only
+            total_addresses += len(addresses) + len(watch_only)
+
+            # 지갑 잔액 합계
+            wallet_total = sum(
+                self._balances.get(addr, 0)
+                for addr in addresses
+            )
+            wallet_total += sum(
+                self._balances.get(addr, 0)
+                for addr in watch_only
+            )
+
+            header_text = f"[{wallet_name}.json] ({len(addresses)} addr) - {wallet_total:,.2f} JACK"
+            header_item = ListItem(Label(header_text))
+            header_item.data = {"type": "wallet", "name": wallet_name}
+            list_view.append(header_item)
+
+            # 주소들
+            for addr in addresses:
+                balance = self._balances.get(addr, 0)
+                prefix = "[*]" if addr == self.app.selected_address else "   "
+                addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK"
+
+                addr_item = ListItem(Label(addr_text))
+                addr_item.data = {"type": "address", "address": addr, "wallet": wallet_name}
+                list_view.append(addr_item)
+
+            # Watch-only 주소
+            for addr in watch_only:
+                balance = self._balances.get(addr, 0)
+                prefix = "[*]" if addr == self.app.selected_address else "   "
+                addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK (watch)"
+
+                addr_item = ListItem(Label(addr_text))
+                addr_item.data = {"type": "address", "address": addr, "wallet": wallet_name, "watch": True}
+                list_view.append(addr_item)
+
+        # 통계 업데이트
+        self.query_one("#wallet-stats", Label).update(
+            f"Wallets: {len(self._wallets)} | Addresses: {total_addresses}"
+        )
+
+    async def _load_all_balances(self) -> None:
+        """모든 주소의 잔액 로드"""
+        all_addresses = list(self._addr_to_wallet.keys())
+
+        for addr in all_addresses:
+            try:
+                resp = await self.rpc.get_balance(addr)
+                if resp.success:
+                    self._balances[addr] = resp.result or 0
+                else:
+                    self._balances[addr] = 0
+            except Exception:
+                self._balances[addr] = 0
+
+        # 총 잔액 업데이트
+        total = sum(self._balances.values())
+        self.query_one("#total-balance", Label).update(f"Total: {total:,.2f} JACK")
+
+        # 목록도 업데이트 (잔액 반영)
+        self._update_wallet_list()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """버튼 클릭 처리"""
         btn_id = event.button.id
 
-        # 지갑 생성/불러오기
         if btn_id == "btn-create-wallet":
-            self._show_panel("create-wallet-panel")
-        elif btn_id == "btn-load-wallet" or btn_id == "btn-switch-wallet":
-            self._show_wallet_list()
-            self._show_panel("load-wallet-panel")
+            self.query_one("#create-wallet-panel").remove_class("hidden")
         elif btn_id == "btn-confirm-create":
             self._create_wallet()
         elif btn_id == "btn-cancel-create":
-            self._hide_panel("create-wallet-panel")
-        elif btn_id == "btn-confirm-load":
-            self._load_selected_wallet()
-        elif btn_id == "btn-cancel-load":
-            self._hide_panel("load-wallet-panel")
-
-        # 주소 관리
-        elif btn_id == "btn-add-address":
-            self._add_new_address()
-
-        # 고급 설정
-        elif btn_id == "btn-advanced":
-            self._show_panel("advanced-panel")
-        elif btn_id == "btn-close-advanced":
-            self._hide_panel("advanced-panel")
-        elif btn_id == "btn-import-key":
-            self._import_private_key()
-        elif btn_id == "btn-add-watch":
-            self._add_watch_only()
+            self.query_one("#create-wallet-panel").add_class("hidden")
+        elif btn_id == "btn-refresh":
+            self.refresh_data()
+            self.query_one("#wallet-status", Label).update("Refreshed!")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """리스트 아이템 선택"""
         item = event.item
-        if hasattr(item, "data"):
-            addr = item.data
-            # 주소 선택
-            if event.list_view.id == "address-list":
-                self.app.selected_address = addr
-                self._update_address_list()
-                self.query_one("#wallet-status", Label).update(f"선택됨: {addr[:20]}...")
-            # 지갑 파일 선택
-            elif event.list_view.id == "wallet-file-list":
-                # 선택만 표시, 확인 버튼으로 로드
-                pass
+        if not hasattr(item, "data") or not item.data:
+            return
 
-    def _show_panel(self, panel_id: str) -> None:
-        """패널 표시"""
-        # 모든 패널 숨기기
-        for pid in ["create-wallet-panel", "load-wallet-panel", "advanced-panel"]:
-            self.query_one(f"#{pid}").add_class("hidden")
-        # 선택된 패널 표시
-        self.query_one(f"#{panel_id}").remove_class("hidden")
+        data = item.data
 
-    def _hide_panel(self, panel_id: str) -> None:
-        """패널 숨기기"""
-        self.query_one(f"#{panel_id}").add_class("hidden")
+        if data.get("type") == "address":
+            addr = data["address"]
+            wallet_name = data["wallet"]
 
-    def _show_wallet_list(self) -> None:
-        """지갑 파일 목록 표시"""
-        list_view = self.query_one("#wallet-file-list", ListView)
-        list_view.clear()
+            # 선택된 주소 업데이트
+            self.app.selected_address = addr
 
-        wallet_files = self.app.get_wallet_files()
-        for wf in wallet_files:
-            item = ListItem(Label(f"> {wf.name}"))
-            item.data = wf
-            list_view.append(item)
+            # 해당 지갑도 현재 지갑으로 설정
+            if wallet_name in self._wallets:
+                self.app.current_wallet = self._wallets[wallet_name]
+                wallet_path = self.app.wallet_dir / f"{wallet_name}.json"
+                self.app.current_wallet_file = wallet_path
 
-        if not wallet_files:
-            list_view.append(ListItem(Label("(지갑 파일 없음)")))
+            self.query_one("#wallet-status", Label).update(
+                f"Selected: {addr[:20]}... ({wallet_name})"
+            )
+            self._update_wallet_list()
 
     def _create_wallet(self) -> None:
         """새 지갑 생성"""
-        name = self.query_one("#new-wallet-name", Input).value.strip()
+        name_input = self.query_one("#new-wallet-name", Input)
+        name = name_input.value.strip()
+
         if not name:
             self.query_one("#wallet-status", Label).update("Enter wallet name")
             return
@@ -284,74 +249,8 @@ class WalletWidget(ScrollableContainer):
 
         if self.app.create_wallet(safe_name):
             self.query_one("#wallet-status", Label).update(f"Created: {safe_name}.json")
-            self.query_one("#new-wallet-name", Input).value = ""
-            self._hide_panel("create-wallet-panel")
-            self._update_ui()
+            name_input.value = ""
+            self.query_one("#create-wallet-panel").add_class("hidden")
+            self.refresh_data()
         else:
             self.query_one("#wallet-status", Label).update("Failed (already exists?)")
-
-    def _load_selected_wallet(self) -> None:
-        """선택된 지갑 로드"""
-        list_view = self.query_one("#wallet-file-list", ListView)
-        if list_view.highlighted_child and hasattr(list_view.highlighted_child, "data"):
-            wallet_path = list_view.highlighted_child.data
-            if self.app.load_wallet(wallet_path):
-                self.query_one("#wallet-status", Label).update(f"Loaded: {wallet_path.name}")
-                self._hide_panel("load-wallet-panel")
-                self._update_ui()
-            else:
-                self.query_one("#wallet-status", Label).update("Load failed")
-        else:
-            self.query_one("#wallet-status", Label).update("Select a wallet")
-
-    def _add_new_address(self) -> None:
-        """새 주소 추가"""
-        if not self.app.current_wallet:
-            return
-
-        new_addr = self.app.current_wallet.generate_address()
-        self.app.selected_address = new_addr
-        self.query_one("#wallet-status", Label).update(f"New: {new_addr[:20]}...")
-        self._update_address_list()
-
-    def _import_private_key(self) -> None:
-        """개인키 가져오기"""
-        if not self.app.current_wallet:
-            self.query_one("#wallet-status", Label).update("Create wallet first")
-            return
-
-        privkey_hex = self.query_one("#import-privkey", Input).value.strip()
-        if not privkey_hex:
-            self.query_one("#wallet-status", Label).update("Enter private key")
-            return
-
-        try:
-            privkey = bytes.fromhex(privkey_hex)
-            if len(privkey) != 32:
-                raise ValueError("Need 32 bytes")
-
-            addr = self.app.current_wallet.import_private_key(privkey)
-            self.app.selected_address = addr
-            self.query_one("#wallet-status", Label).update(f"Imported: {addr[:20]}...")
-            self.query_one("#import-privkey", Input).value = ""
-            self._update_address_list()
-        except Exception as e:
-            self.query_one("#wallet-status", Label).update(f"Error: {e}")
-
-    def _add_watch_only(self) -> None:
-        """감시 전용 주소 추가"""
-        if not self.app.current_wallet:
-            self.query_one("#wallet-status", Label).update("Create wallet first")
-            return
-
-        addr = self.query_one("#watch-address", Input).value.strip()
-        if not addr:
-            self.query_one("#wallet-status", Label).update("Enter address")
-            return
-
-        if self.app.current_wallet.add_watch_only(addr):
-            self.query_one("#wallet-status", Label).update(f"Watch added: {addr[:20]}...")
-            self.query_one("#watch-address", Input).value = ""
-            self._update_address_list()
-        else:
-            self.query_one("#wallet-status", Label).update("Invalid address")
