@@ -4,6 +4,9 @@ Wallet Widget
 다중 지갑 통합 뷰 - 모든 지갑 파일을 한 화면에서 조회
 """
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -55,6 +58,7 @@ class WalletWidget(ScrollableContainer):
                 Button("[+] New Wallet", id="btn-create-wallet", variant="success"),
                 Button("[+] Add Address", id="btn-add-address", variant="warning"),
                 Button("[S] Settings", id="btn-settings", variant="default"),
+                Button("[F] Open Folder", id="btn-open-folder", variant="default"),
                 Button("[R] Refresh", id="btn-refresh", variant="primary"),
                 classes="action-buttons",
             ),
@@ -271,6 +275,8 @@ class WalletWidget(ScrollableContainer):
             self._add_watch_only()
         elif btn_id == "btn-add-address":
             self._add_new_address()
+        elif btn_id == "btn-open-folder":
+            self._open_wallet_folder()
         elif btn_id == "btn-refresh":
             self.refresh_data()
             self.query_one("#wallet-status", Label).update("Refreshed!")
@@ -279,6 +285,20 @@ class WalletWidget(ScrollableContainer):
         """모든 패널 숨기기"""
         self.query_one("#create-wallet-panel").add_class("hidden")
         self.query_one("#settings-panel").add_class("hidden")
+
+    def _open_wallet_folder(self) -> None:
+        """지갑 폴더 열기"""
+        wallet_dir = self.app.wallet_dir
+        try:
+            if sys.platform == "win32":
+                os.startfile(wallet_dir)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", wallet_dir])
+            else:
+                subprocess.run(["xdg-open", wallet_dir])
+            self.query_one("#wallet-status", Label).update(f"Opened: {wallet_dir}")
+        except Exception as e:
+            self.query_one("#wallet-status", Label).update(f"Error: {e}")
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """리스트 아이템 선택"""
