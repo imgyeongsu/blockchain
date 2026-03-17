@@ -22,6 +22,8 @@ class RPCClient:
     """JSON-RPC 클라이언트"""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8332):
+        self.host = host
+        self.port = port
         self.url = f"http://{host}:{port}"
         self._session: Optional[aiohttp.ClientSession] = None
         self._request_id = 0

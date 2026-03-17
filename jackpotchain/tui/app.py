@@ -4,6 +4,7 @@ JackpotChain TUI Main Application
 textual 기반 메인 앱 (ContentSwitcher 방식)
 """
 
+from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import Header, Footer, ContentSwitcher, Static
@@ -16,6 +17,7 @@ from .widgets.lotto import LottoWidget
 from .widgets.claims import ClaimsWidget
 from .widgets.network import NetworkWidget
 from .client import RPCClient
+from ..wallet.wallet import Wallet
 
 
 class JackpotChainApp(App):
@@ -36,10 +38,58 @@ class JackpotChainApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8332):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8332, wallet_dir: str = "./wallets"):
         super().__init__()
         self.rpc = RPCClient(host, port)
         self._current_tab = "dashboard"
+
+        # 지갑 상태
+        self.wallet_dir = Path(wallet_dir)
+        self.wallet_dir.mkdir(parents=True, exist_ok=True)
+        self.current_wallet: Wallet | None = None
+        self.current_wallet_file: Path | None = None
+        self.selected_address: str | None = None
+
+        # 기본 지갑 로드 시도
+        self._load_default_wallet()
+
+    def _load_default_wallet(self) -> None:
+        """기본 지갑 로드"""
+        default_path = self.wallet_dir / "default.json"
+        if default_path.exists():
+            self.load_wallet(default_path)
+        # 없으면 None 상태 유지 (Wallet 탭에서 생성 유도)
+
+    def load_wallet(self, wallet_path: Path) -> bool:
+        """지갑 파일 로드"""
+        try:
+            self.current_wallet = Wallet(str(wallet_path))
+            self.current_wallet_file = wallet_path
+            # 첫 번째 주소 선택
+            addresses = self.current_wallet.get_addresses()
+            if addresses:
+                self.selected_address = addresses[0]
+            return True
+        except Exception:
+            return False
+
+    def create_wallet(self, wallet_name: str) -> bool:
+        """새 지갑 생성"""
+        wallet_path = self.wallet_dir / f"{wallet_name}.json"
+        if wallet_path.exists():
+            return False
+        try:
+            self.current_wallet = Wallet(str(wallet_path))
+            self.current_wallet_file = wallet_path
+            # 첫 번째 주소 자동 생성
+            self.selected_address = self.current_wallet.generate_address(label="기본")
+            return True
+        except Exception:
+            return False
+
+    def get_wallet_files(self) -> list[Path]:
+        """지갑 파일 목록"""
+        return list(self.wallet_dir.glob("*.json"))
 
     def compose(self) -> ComposeResult:
         """UI 구성"""

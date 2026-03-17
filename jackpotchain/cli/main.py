@@ -293,13 +293,13 @@ def run_wallet(args):
 
 def run_tui(args):
     """TUI 실행 (RPC 옵션 지정)"""
-    from ..tui.app import run_tui as start_tui
+    from jackpotchain.tui.app import run_tui as start_tui
     start_tui(host=args.rpc_host, port=args.rpc_port)
 
 
 def run_tui_default():
     """TUI 기본 실행 (127.0.0.1:8332)"""
-    from ..tui.app import run_tui as start_tui
+    from jackpotchain.tui.app import run_tui as start_tui
     start_tui()
 
 
