@@ -158,39 +158,46 @@ class TestPayoutCalculation:
     def test_jackpot_payout(self):
         """1등: 풀의 50%"""
         pool_snapshot = 1_000_000_00_000_000  # 1,000,000 JACK
-        payout = calculate_payout(LottoPrize.JACKPOT, pool_snapshot)
-        assert payout == int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO)
+        jack, pot = calculate_payout(LottoPrize.JACKPOT, pool_snapshot)
+        assert jack == int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO)
+        assert pot == 0
 
     def test_second_payout(self):
         """2등: 100,000 JACK"""
-        payout = calculate_payout(LottoPrize.SECOND, 0)
-        assert payout == LOTTO_PRIZE_2ND
+        jack, pot = calculate_payout(LottoPrize.SECOND, 0)
+        assert jack == LOTTO_PRIZE_2ND
+        assert pot == 0
 
     def test_third_payout(self):
         """3등: 20,000 JACK"""
-        payout = calculate_payout(LottoPrize.THIRD, 0)
-        assert payout == LOTTO_PRIZE_3RD
+        jack, pot = calculate_payout(LottoPrize.THIRD, 0)
+        assert jack == LOTTO_PRIZE_3RD
+        assert pot == 0
 
     def test_fourth_payout(self):
         """4등: 2,000 JACK"""
-        payout = calculate_payout(LottoPrize.FOURTH, 0)
-        assert payout == LOTTO_PRIZE_4TH
+        jack, pot = calculate_payout(LottoPrize.FOURTH, 0)
+        assert jack == LOTTO_PRIZE_4TH
+        assert pot == 0
 
     def test_fifth_payout(self):
         """5등: 300 JACK"""
-        payout = calculate_payout(LottoPrize.FIFTH, 0)
-        assert payout == LOTTO_PRIZE_5TH
+        jack, pot = calculate_payout(LottoPrize.FIFTH, 0)
+        assert jack == LOTTO_PRIZE_5TH
+        assert pot == 0
 
     def test_sixth_payout(self):
-        """6등: 100 JACK (참가비 환불)"""
-        from ..constants import LOTTO_PRIZE_6TH_JACK
-        payout = calculate_payout(LottoPrize.SIXTH, 0)
-        assert payout == LOTTO_PRIZE_6TH_JACK
+        """6등: 1 POT (mint)"""
+        from ..constants import LOTTO_PRIZE_6TH_POT
+        jack, pot = calculate_payout(LottoPrize.SIXTH, 0)
+        assert jack == 0
+        assert pot == LOTTO_PRIZE_6TH_POT
 
     def test_none_payout(self):
         """꽝: 0"""
-        payout = calculate_payout(LottoPrize.NONE, 0)
-        assert payout == 0
+        jack, pot = calculate_payout(LottoPrize.NONE, 0)
+        assert jack == 0
+        assert pot == 0
 
 
 class TestClaimTiming:

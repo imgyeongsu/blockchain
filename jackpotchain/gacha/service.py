@@ -675,8 +675,9 @@ class GachaService:
             inputs.append((inp, utxo, False))  # False = not pool
             total_jack += utxo.output.jack_value
 
-        # 2. 잭팟 풀 UTXO (당첨금)
+        # 2. 잭팟 풀 UTXO (당첨금 - JACK 지급용)
         payout_jack = result.payout_jack
+        payout_pot = result.payout_pot
         if payout_jack > 0:
             pool_utxos = self._select_pool_utxos(utxo_set, payout_jack)
             if not pool_utxos:
@@ -722,7 +723,15 @@ class GachaService:
                     script_pubkey=b'JACKPOT_POOL'
                 ))
 
-        # 4. 사용자 JACK 잔돈 (6등 JACK 보상은 이미 payout_jack에 포함)
+        # 3. 6등 POT 보상 (mint - input 없이 생성)
+        if payout_pot > 0:
+            outputs.append(TxOutput(
+                jack_value=0,
+                script_pubkey=recipient_script,
+                assets={ASSET_ID_POT: payout_pot}
+            ))
+
+        # 4. 사용자 JACK 잔돈
         jack_change = total_jack - MIN_TX_FEE
         if jack_change > 0:
             change_addr = wallet.get_change_address()

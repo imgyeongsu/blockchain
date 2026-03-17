@@ -98,7 +98,7 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 | 3등 | 4개 | 20,000 JACK |
 | 4등 | 3개 | 2,000 JACK |
 | 5등 | 2개 | 300 JACK |
-| 6등 | 1개 | 100 JACK (참가비 환불) |
+| 6등 | 1개 | 1 POT (mint - 참가비 환불) |
 | 꽝 | 0개 | 없음 |
 
 참가비 분배:
@@ -158,9 +158,10 @@ python -m jackpotchain.cli.main wallet send --to <ADDRESS> --amount 1.0
 - 비교 블록 해시로 결과 계산, payout 금액 검증
 
 ### 7.3 POT 6등 보상 UTXO 처리 ✅ 해결됨
-**해결 방안**: 6등 보상을 1 POT 대신 100 JACK으로 변경
-- POT 발행 문제 회피
-- 100 JACK = 1 POT 교환 가격과 동등 (참가비 환불 개념)
+**해결 방안**: LOTTO_CLAIM TX에서 6등일 때 1 POT mint 허용
+- Coinbase처럼 input 없이 POT 생성 가능 (6등 한정)
+- validate_lotto_claim에서 prize 검증 후 POT mint 허용
+- 참가비 환불 개념 유지 (1 POT = 100 JACK 교환가)
 
 ## 8. 문서 운영 원칙
 - 이 README를 SSOT로 사용합니다.

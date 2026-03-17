@@ -487,25 +487,35 @@ def validate_lotto_claim(
     prize = determine_prize(matches)
 
     # 6. Payout 검증
-    # 현재는 pool_snapshot을 알 수 없으므로 1등만 제외하고 검증
-    # (1등은 pool의 50%이므로 snapshot 없이는 정확한 금액 검증 불가)
-    expected_payout = calculate_payout(prize, pool_snapshot=0)
+    # calculate_payout은 (jack_payout, pot_payout) 튜플 반환
+    expected_jack, expected_pot = calculate_payout(prize, pool_snapshot=0)
 
-    # TX에서 실제 payout 추출 (pool UTXO에서 나가는 금액)
-    actual_payout = 0
+    # TX에서 실제 payout 추출
+    actual_jack = 0
+    actual_pot = 0
+    from ..constants import ASSET_ID_POT
     for output in tx.outputs:
         # OP_RETURN과 JACKPOT_POOL 제외한 일반 output이 payout
         if not is_op_return_script(output.script_pubkey) and output.script_pubkey != b'JACKPOT_POOL':
-            actual_payout += output.jack_value
+            actual_jack += output.jack_value
+            actual_pot += output.assets.get(ASSET_ID_POT, 0) if hasattr(output, 'assets') and output.assets else 0
 
-    # 수수료 제외한 순수 payout 비교 (대략적 검증)
-    # TODO: 더 정확한 payout 검증 필요 (1등 pool snapshot 포함)
-    if prize.value > 0 and prize.value < 6:  # 2~5등 고정 금액
-        if actual_payout < expected_payout:
+    # 2~5등: JACK 고정 금액 검증
+    if prize.value > 0 and prize.value < 6:
+        if actual_jack < expected_jack:
             return TxValidationResult(
                 is_valid=False,
                 error=TxValidationError.INVALID_PAYOUT,
-                message=f"Payout mismatch: expected >= {expected_payout}, got {actual_payout}"
+                message=f"JACK payout mismatch: expected >= {expected_jack}, got {actual_jack}"
+            )
+
+    # 6등: POT mint 검증
+    if prize.value == 6:
+        if actual_pot != expected_pot:
+            return TxValidationResult(
+                is_valid=False,
+                error=TxValidationError.INVALID_PAYOUT,
+                message=f"POT payout mismatch: expected {expected_pot}, got {actual_pot}"
             )
 
     return TxValidationResult(is_valid=True)

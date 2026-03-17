@@ -426,6 +426,7 @@ class LottoGame:
 
         # 보상 계산
         payout_jack = 0
+        payout_pot = 0
 
         if prize == LottoPrize.JACKPOT:
             # 1등: Commit 시점 풀 잔액의 50%
@@ -435,8 +436,8 @@ class LottoGame:
                 tx.get_txid()
             )
         elif prize != LottoPrize.NONE:
-            # 2~6등: 고정 JACK 보상 (6등도 이제 JACK)
-            payout_jack = calculate_payout(prize, commit.pool_snapshot)
+            # 2~6등: calculate_payout이 (jack, pot) 튜플 반환
+            payout_jack, payout_pot = calculate_payout(prize, commit.pool_snapshot)
 
         # 기록 업데이트
         self.store.update_claim(
@@ -447,7 +448,7 @@ class LottoGame:
             result_digits=result_digits,
             matches=matches,
             prize=prize,
-            payout=payout_jack
+            payout=payout_jack + payout_pot  # 총 보상 (기록용)
         )
 
         return LottoPlayResult(
@@ -455,7 +456,7 @@ class LottoGame:
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=0,  # 더 이상 POT 지급 없음
+            payout_pot=payout_pot,  # 6등: 1 POT mint
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
@@ -540,19 +541,20 @@ class LottoGame:
 
         # 예상 보상 계산
         payout_jack = 0
+        payout_pot = 0
         if prize == LottoPrize.JACKPOT:
             payout_jack = self.pool.calculate_jackpot_payout(commit_height)
         elif prize != LottoPrize.NONE:
-            # 2~6등: 고정 JACK 보상
+            # 2~6등: calculate_payout이 (jack, pot) 튜플 반환
             pool_snapshot = self.pool.balance
-            payout_jack = calculate_payout(prize, pool_snapshot)
+            payout_jack, payout_pot = calculate_payout(prize, pool_snapshot)
 
         return LottoPlayResult(
             success=True,
             matches=matches,
             prize=prize,
             payout_jack=payout_jack,
-            payout_pot=0,  # 더 이상 POT 지급 없음
+            payout_pot=payout_pot,  # 6등: 1 POT mint
             chosen_numbers=chosen_numbers,
             result_digits=result_digits
         )
