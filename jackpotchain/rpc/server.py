@@ -592,6 +592,8 @@ class RPCServer:
 
                 # 블록 템플릿 생성
                 txs = self.mempool.get_txs_for_block()
+                if txs:
+                    print(f"[Miner] Including {len(txs)} TXs from mempool")
                 tip = self.blockchain.get_tip()
                 difficulty = get_next_difficulty(
                     self.blockchain.get_height(),
@@ -734,6 +736,8 @@ class RPCServer:
         )
 
         if not success:
+            # 실패 시 pending commit 취소 (UTXO 예약 해제)
+            self.gacha_service.cancel_pending_commit(pending.commit_hash)
             raise Exception(f"Failed to add to mempool: {msg}")
 
         # 네트워크 전파

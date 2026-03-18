@@ -546,8 +546,12 @@ class Node:
 
         # mempool에 추가
         if self.mempool and not self.mempool.has_tx(tx.get_txid()):
-            added = self.mempool.add_tx(tx)
-            if added:
+            success, msg = self.mempool.add_tx(
+                tx,
+                self.blockchain.utxo_set,
+                self.blockchain.get_height()
+            )
+            if success:
                 # 다른 피어에게 재전파
                 await self._relay_tx(tx, exclude=address)
 

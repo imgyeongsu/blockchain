@@ -218,6 +218,7 @@ class Mempool:
 
             # 의존 TX가 모두 포함되어야 함
             if not entry.depends_on.issubset(included):
+                print(f"[Mempool] TX {txid.hex()[:16]} skipped - depends on {len(entry.depends_on)} unincluded TXs")
                 continue
 
             if total_size + entry.size > max_size:
