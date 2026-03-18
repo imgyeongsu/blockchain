@@ -18,7 +18,7 @@ from ..constants import (
     LOTTO_COMPARISON_OFFSETS,
     LOTTO_MIN_CLAIM_GAP,
     LOTTO_MAX_CLAIM_GAP,
-    LOTTO_PRIZE_1ST_RATIO,
+    LOTTO_PRIZE_1ST_PERCENT,
     LOTTO_PRIZE_2ND,
     LOTTO_PRIZE_3RD,
     LOTTO_PRIZE_4TH,
@@ -193,7 +193,7 @@ def calculate_payout(prize: LottoPrize, pool_snapshot: int) -> Tuple[int, int]:
         (jack_payout, pot_payout): JACK과 POT satoshi 단위
     """
     if prize == LottoPrize.JACKPOT:
-        return (int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO), 0)
+        return (pool_snapshot * LOTTO_PRIZE_1ST_PERCENT // 100, 0)
     elif prize == LottoPrize.SECOND:
         return (LOTTO_PRIZE_2ND, 0)
     elif prize == LottoPrize.THIRD:

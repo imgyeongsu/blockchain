@@ -6,6 +6,8 @@ Step 14: RPC 서버
 
 import json
 import asyncio
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 from dataclasses import dataclass
 from aiohttp import web
@@ -60,6 +62,7 @@ class RPCServer:
         gacha: GachaGame = None,
         gacha_service: GachaService = None,
         data_dir: str = None,
+        wallet_dir: str = None,
         host: str = "127.0.0.1",
         port: int = DEFAULT_RPC_PORT
     ):
@@ -70,12 +73,20 @@ class RPCServer:
         self.gacha = gacha or GachaGame()
         self.gacha_service = gacha_service or create_gacha_service(data_dir=data_dir)
 
+        # 다중 지갑 지원
+        self.wallet_dir = wallet_dir
+        self.wallets: Dict[str, Wallet] = {}  # name -> Wallet
+        self._load_all_wallets()
+
         # 블록 해시 조회 콜백 설정
         def get_block_hash(height: int) -> bytes:
             block = blockchain.get_block_by_height(height)
             return block.get_hash() if block else None
 
         self.gacha.set_block_hash_getter(get_block_hash)
+        # gacha_service.game에도 설정 (create_claim에서 사용)
+        if self.gacha_service and hasattr(self.gacha_service, 'game'):
+            self.gacha_service.game.set_block_hash_getter(get_block_hash)
 
         self.host = host
         self.port = port
@@ -113,6 +124,7 @@ class RPCServer:
 
         # Wallet
         self._methods['getbalance'] = self._getbalance
+        self._methods['getbalances'] = self._getbalances  # JACK + POT
         self._methods['getnewaddress'] = self._getnewaddress
         self._methods['listunspent'] = self._listunspent
         self._methods['sendtoaddress'] = self._sendtoaddress
@@ -143,6 +155,11 @@ class RPCServer:
         # Exchange (JACK -> POT)
         self._methods['exchangetopot'] = self._exchangetopot
         self._methods['getexchangeinfo'] = self._getexchangeinfo
+
+        # Wallet Management
+        self._methods['listwallets'] = self._listwallets
+        self._methods['setwallet'] = self._setwallet
+        self._methods['getactivewallet'] = self._getactivewallet
 
         # Utility
         self._methods['help'] = self._help
@@ -357,6 +374,39 @@ class RPCServer:
             current_height
         )
         return balance / 100_000_000  # satoshi → JACK
+
+    def _getbalances(self, address: str = None) -> dict:
+        """JACK + POT 잔액 조회"""
+        from ..constants import ASSET_ID_POT, COIN
+
+        current_height = self.blockchain.get_height()
+
+        if address:
+            # 특정 주소의 UTXO
+            utxos = self.blockchain.utxo_set.get_utxos_for_address(address)
+        elif self.wallet:
+            # 지갑의 모든 주소 UTXO
+            utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
+        else:
+            raise Exception("Wallet not available")
+
+        # mature UTXO만 필터
+        mature_utxos = [u for u in utxos if u.is_mature(current_height)]
+
+        jack_balance = 0
+        pot_balance = 0
+
+        for utxo in mature_utxos:
+            jack_balance += utxo.output.jack_value
+            if utxo.output.assets and ASSET_ID_POT in utxo.output.assets:
+                pot_balance += utxo.output.assets[ASSET_ID_POT]
+
+        return {
+            'jack': jack_balance / COIN,
+            'pot': pot_balance / COIN,
+            'jack_satoshi': jack_balance,
+            'pot_satoshi': pot_balance,
+        }
 
     def _getnewaddress(self, label: str = "") -> str:
         """새 주소 생성"""
@@ -849,7 +899,13 @@ class RPCServer:
             comparison_heights = get_comparison_heights(commit_height)
 
             # 상태 계산
-            if c.block_height == 0:
+            # 먼저 chain에서 claim 여부 확인
+            commit_info = self.blockchain.get_commit_info(c.commit_hash)
+            if commit_info and commit_info.claim_height > 0:
+                status = "claimed"
+                can_claim = False
+                blocks_until_claimable = 0
+            elif c.block_height == 0:
                 status = "pending_mine"
                 can_claim = False
                 blocks_until_claimable = LOTTO_MIN_CLAIM_GAP
@@ -1000,6 +1056,89 @@ class RPCServer:
             'jack_burned': result.jack_burned / COIN,
             'pot_received': result.pot_amount / COIN,
             'jack_change': result.jack_change / COIN,
+        }
+
+    # =========================================================================
+    # Wallet Management
+    # =========================================================================
+
+    def _load_all_wallets(self) -> None:
+        """wallet_dir의 모든 지갑 로드"""
+        if not self.wallet_dir:
+            # wallet_dir 없으면 기존 wallet만 사용
+            if self.wallet:
+                # 기존 wallet의 파일명 추출
+                wallet_path = Path(self.wallet._wallet_file) if hasattr(self.wallet, '_wallet_file') else None
+                if wallet_path:
+                    name = wallet_path.stem
+                    self.wallets[name] = self.wallet
+            return
+
+        wallet_path = Path(self.wallet_dir)
+        if not wallet_path.exists():
+            return
+
+        for wf in wallet_path.glob("*.json"):
+            try:
+                w = Wallet(str(wf))
+                name = wf.stem
+                self.wallets[name] = w
+                # 첫 번째 지갑을 기본 활성 지갑으로
+                if self.wallet is None:
+                    self.wallet = w
+            except Exception:
+                pass  # 로드 실패 무시
+
+    def _listwallets(self) -> dict:
+        """로드된 지갑 목록"""
+        active_name = None
+        if self.wallet:
+            for name, w in self.wallets.items():
+                if w is self.wallet:
+                    active_name = name
+                    break
+
+        result = []
+        for name, w in self.wallets.items():
+            addrs = w.get_addresses()
+            result.append({
+                'name': name,
+                'addresses': len(addrs),
+                'active': name == active_name,
+            })
+        return {
+            'wallets': result,
+            'count': len(result),
+            'active': active_name,
+        }
+
+    def _setwallet(self, name: str) -> dict:
+        """활성 지갑 변경"""
+        if name not in self.wallets:
+            raise Exception(f"Wallet not found: {name}")
+
+        self.wallet = self.wallets[name]
+        return {
+            'success': True,
+            'active': name,
+            'addresses': len(self.wallet.get_addresses()),
+        }
+
+    def _getactivewallet(self) -> dict:
+        """현재 활성 지갑 정보"""
+        if not self.wallet:
+            return {'active': None}
+
+        active_name = None
+        for name, w in self.wallets.items():
+            if w is self.wallet:
+                active_name = name
+                break
+
+        return {
+            'active': active_name,
+            'addresses': self.wallet.get_addresses(),
+            'watch_only': list(self.wallet._watch_only) if hasattr(self.wallet, '_watch_only') else [],
         }
 
     # =========================================================================

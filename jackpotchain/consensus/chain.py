@@ -13,8 +13,8 @@ from enum import Enum
 from ..core.block import Block, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
-from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_hash
-from ..constants import TX_VERSION_COMMIT
+from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_hash, is_claim_script, extract_claim_data
+from ..constants import TX_VERSION_COMMIT, TX_VERSION_CLAIM
 
 
 class ChainState(Enum):
@@ -51,6 +51,7 @@ class CommitInfo:
     tx_id: bytes
     block_height: int
     block_hash: bytes
+    claim_height: int = 0  # Claim된 높이 (0이면 미클레임)
 
 
 class Blockchain:
@@ -365,6 +366,8 @@ class Blockchain:
 
             # Commit TX 인덱싱
             self._index_commit_tx(tx, height, block_hash)
+            # Claim TX 인덱싱
+            self._index_claim_tx(tx, height)
 
         # Undo 데이터 저장 (나중에 disconnect용)
         self._undo_data[block_hash] = undo_data
@@ -439,6 +442,23 @@ class Blockchain:
                 commit_hash = extract_commit_hash(output.script_pubkey)
                 if commit_hash and commit_hash in self._commit_index:
                     del self._commit_index[commit_hash]
+                    return
+
+    def _index_claim_tx(self, tx, height: int):
+        """
+        Claim TX 인덱싱 - 해당 commit의 claim_height 업데이트
+        """
+        if tx.version != TX_VERSION_CLAIM:
+            return
+
+        for output in tx.outputs:
+            if is_claim_script(output.script_pubkey):
+                claim_data = extract_claim_data(output.script_pubkey)
+                if claim_data:
+                    commit_hash, nonce, chosen_numbers = claim_data
+                    # 해당 commit의 claim_height 업데이트
+                    if commit_hash in self._commit_index:
+                        self._commit_index[commit_hash].claim_height = height
                     return
 
     def get_commit_info(self, commit_hash: bytes) -> Optional[CommitInfo]:

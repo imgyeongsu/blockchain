@@ -9,12 +9,14 @@ from dataclasses import dataclass
 
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..script.standard import create_p2pkh_script_pubkey, create_op_return_script
-from ..crypto.address import address_to_pubkey_hash, validate_address, BURN_ADDRESS
+from ..crypto.address import address_to_pubkey_hash, validate_address, BURN_ADDRESS, JACKPOT_POOL_ADDRESS
 from ..constants import (
     EXCHANGE_RATE,
     TX_VERSION_EXCHANGE,
     COIN,
     ASSET_ID_POT,
+    LOTTO_POOL_PERCENT,
+    LOTTO_BURN_PERCENT,
 )
 
 
@@ -22,15 +24,21 @@ from ..constants import (
 class ExchangeResult:
     """교환 결과"""
     success: bool
-    pot_amount: int = 0     # 받는 POT (satoshi 단위)
-    jack_burned: int = 0    # 소각되는 JACK
-    jack_change: int = 0    # 잔돈 JACK
+    pot_amount: int = 0       # 받는 POT (satoshi 단위)
+    jack_to_pool: int = 0     # 잭팟 풀 (80%)
+    jack_burned: int = 0      # 소각 (19%)
+    jack_change: int = 0      # 잔돈 JACK
     error: str = ""
 
 
 def calculate_exchange(jack_amount: int) -> ExchangeResult:
     """
     JACK → POT 교환 계산
+
+    분배:
+    - 80% → 잭팟 풀 적립
+    - 19% → 소각
+    - 1% → 채굴자 (수수료로 처리)
 
     Args:
         jack_amount: 교환할 JACK (satoshi 단위)
@@ -50,12 +58,18 @@ def calculate_exchange(jack_amount: int) -> ExchangeResult:
 
     # 교환 가능한 POT 수량
     pot_amount = (jack_amount // exchange_unit) * COIN
-    jack_burned = (pot_amount // COIN) * exchange_unit
-    jack_change = jack_amount - jack_burned
+    jack_exchanged = (pot_amount // COIN) * exchange_unit
+    jack_change = jack_amount - jack_exchanged
+
+    # 교환된 JACK 분배 (정수 연산)
+    jack_to_pool = jack_exchanged * LOTTO_POOL_PERCENT // 100  # 80%
+    jack_burned = jack_exchanged * LOTTO_BURN_PERCENT // 100   # 19%
+    # 나머지 1%는 수수료로 채굴자에게 (TX에 포함하지 않음)
 
     return ExchangeResult(
         success=True,
         pot_amount=pot_amount,
+        jack_to_pool=jack_to_pool,
         jack_burned=jack_burned,
         jack_change=jack_change
     )
@@ -104,7 +118,15 @@ def create_exchange_tx(
     )
     outputs.append(pot_output)
 
-    # 2. OP_RETURN (소각 기록)
+    # 2. 잭팟 풀 (80%)
+    if result.jack_to_pool > 0:
+        pool_output = TxOutput(
+            jack_value=result.jack_to_pool,
+            script_pubkey=b'JACKPOT_POOL'  # 특수 마커 (miner.py와 동일)
+        )
+        outputs.append(pool_output)
+
+    # 3. OP_RETURN (소각 기록 - 19%)
     burn_data = f"EXCHANGE:{result.jack_burned}".encode()
     burn_output = TxOutput(
         jack_value=0,
@@ -112,8 +134,12 @@ def create_exchange_tx(
     )
     outputs.append(burn_output)
 
-    # 3. JACK 잔돈 (있으면)
-    change_jack = total_input - result.jack_burned
+    # 4. JACK 잔돈 (있으면)
+    # jack_exchanged = 100% (교환에 사용된 총 JACK)
+    # = pool(80%) + burn(19%) + miner_fee(1%)
+    # burn과 miner_fee는 출력 없음 (암시적 소각/수수료)
+    jack_exchanged = (result.pot_amount // COIN) * EXCHANGE_RATE * COIN
+    change_jack = total_input - jack_exchanged
     if change_jack > 0:
         change_pubkey_hash = address_to_pubkey_hash(change_address)
         change_output = TxOutput(
@@ -140,24 +166,31 @@ def validate_exchange_tx(tx: Transaction) -> Tuple[bool, str]:
     검증 항목:
     - 버전 확인
     - POT 출력 존재
-    - OP_RETURN 소각 기록
+    - 잭팟 풀 출력 존재 (80%)
+    - OP_RETURN 소각 기록 (19%)
     - 금액 일치
     """
     if tx.version != TX_VERSION_EXCHANGE:
         return False, "Invalid TX version for exchange"
 
-    # POT 출력 찾기
+    # 출력 찾기
     pot_output = None
+    pool_output = None
     burn_output = None
 
     for out in tx.outputs:
         if ASSET_ID_POT in out.assets:
             pot_output = out
-        if out.script_pubkey and out.script_pubkey[0] == 0x6a:  # OP_RETURN
+        if out.script_pubkey == b'JACKPOT_POOL':
+            pool_output = out
+        if out.script_pubkey and len(out.script_pubkey) > 0 and out.script_pubkey[0] == 0x6a:  # OP_RETURN
             burn_output = out
 
     if pot_output is None:
         return False, "No POT output found"
+
+    if pool_output is None:
+        return False, "No jackpot pool output found"
 
     if burn_output is None:
         return False, "No burn record found"
@@ -173,12 +206,24 @@ def validate_exchange_tx(tx: Transaction) -> Tuple[bool, str]:
     except (ValueError, UnicodeDecodeError):
         return False, "Cannot parse burn record"
 
-    # 금액 검증
+    # 금액 검증 - POT
     pot_amount = pot_output.assets.get(ASSET_ID_POT, 0)
-    expected_pot = calculate_exchange(burned_jack)
+    jack_exchanged = (pot_amount // COIN) * EXCHANGE_RATE * COIN
+    expected = calculate_exchange(jack_exchanged)
 
-    if not expected_pot.success or pot_amount != expected_pot.pot_amount:
-        return False, "Exchange amount mismatch"
+    if not expected.success:
+        return False, "Invalid exchange amount"
+
+    if pot_amount != expected.pot_amount:
+        return False, "POT amount mismatch"
+
+    # 금액 검증 - Pool (80%)
+    if pool_output.jack_value != expected.jack_to_pool:
+        return False, f"Pool amount mismatch: {pool_output.jack_value} != {expected.jack_to_pool}"
+
+    # 금액 검증 - Burn (19%)
+    if burned_jack != expected.jack_burned:
+        return False, f"Burn amount mismatch: {burned_jack} != {expected.jack_burned}"
 
     return True, ""
 
@@ -189,20 +234,23 @@ def get_exchange_info(tx: Transaction) -> Optional[dict]:
         return None
 
     info = {
-        'jack_burned': 0,
         'pot_received': 0,
+        'jack_to_pool': 0,
+        'jack_burned': 0,
         'jack_change': 0,
     }
 
     for out in tx.outputs:
         if ASSET_ID_POT in out.assets:
             info['pot_received'] = out.assets[ASSET_ID_POT]
+        elif out.script_pubkey == b'JACKPOT_POOL':
+            info['jack_to_pool'] = out.jack_value
         elif out.jack_value > 0:
             info['jack_change'] = out.jack_value
 
     # OP_RETURN에서 소각량 추출
     for out in tx.outputs:
-        if out.script_pubkey and out.script_pubkey[0] == 0x6a:
+        if out.script_pubkey and len(out.script_pubkey) > 0 and out.script_pubkey[0] == 0x6a:
             from ..script.standard import extract_op_return_data
             data = extract_op_return_data(out.script_pubkey)
             if data and data.startswith(b'EXCHANGE:'):

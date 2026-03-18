@@ -39,7 +39,8 @@ class WalletWidget(ScrollableContainer):
         # 총 잔액 헤더
         yield Vertical(
             Label("ALL WALLETS", classes="box-title"),
-            Label("Total: -- JACK", id="total-balance", classes="stat-value green"),
+            Label("JACK: --", id="total-jack", classes="stat-value green"),
+            Label("POT: --", id="total-pot", classes="stat-value yellow"),
             Label("Wallets: 0 | Addresses: 0", id="wallet-stats", classes="stat-value"),
             classes="stat-box",
         )
@@ -57,12 +58,30 @@ class WalletWidget(ScrollableContainer):
             Horizontal(
                 Button("[+] New Wallet", id="btn-create-wallet", variant="success"),
                 Button("[+] Add Address", id="btn-add-address", variant="warning"),
+                Button("[E] Exchange", id="btn-exchange", variant="warning"),
                 Button("[S] Settings", id="btn-settings", variant="default"),
                 Button("[F] Open Folder", id="btn-open-folder", variant="default"),
                 Button("[R] Refresh", id="btn-refresh", variant="primary"),
                 classes="action-buttons",
             ),
             classes="stat-box",
+        )
+
+        # Exchange 패널 (숨김)
+        yield Vertical(
+            Label("EXCHANGE JACK → POT", classes="box-title"),
+            Label("Rate: 100 JACK = 1 POT", classes="stat-value"),
+            Horizontal(
+                Label("Amount:", classes="stat-label"),
+                Input(placeholder="100", id="exchange-amount"),
+            ),
+            Horizontal(
+                Button("Exchange", id="btn-confirm-exchange", variant="warning"),
+                Button("Cancel", id="btn-cancel-exchange", variant="error"),
+                classes="action-buttons",
+            ),
+            classes="stat-box hidden",
+            id="exchange-panel",
         )
 
         # 지갑 생성 패널 (숨김)
@@ -214,41 +233,50 @@ class WalletWidget(ScrollableContainer):
         )
 
     async def _load_all_balances(self) -> None:
-        """모든 주소의 잔액 로드"""
+        """모든 주소의 잔액 로드 (JACK + POT)"""
         all_addresses = list(self._addr_to_wallet.keys())
 
         if not all_addresses:
             self._node_connected = False
-            self.query_one("#total-balance", Label).update("Total: -- JACK (no addresses)")
+            self.query_one("#total-jack", Label).update("JACK: -- (no addresses)")
+            self.query_one("#total-pot", Label).update("POT: --")
             return
 
         # 첫 번째 주소로 노드 연결 확인
         first_addr = all_addresses[0]
         try:
-            resp = await self.rpc.get_balance(first_addr)
+            resp = await self.rpc.get_balances(first_addr)
             self._node_connected = resp.success
         except Exception:
             self._node_connected = False
 
         if not self._node_connected:
-            self.query_one("#total-balance", Label).update("Total: -- JACK (node required)")
+            self.query_one("#total-jack", Label).update("JACK: -- (node required)")
+            self.query_one("#total-pot", Label).update("POT: --")
             self._update_wallet_list()
             return
 
         # 노드 연결됨 - 모든 잔액 로드
+        total_jack = 0
+        total_pot = 0
         for addr in all_addresses:
             try:
-                resp = await self.rpc.get_balance(addr)
+                resp = await self.rpc.get_balances(addr)
                 if resp.success:
-                    self._balances[addr] = resp.result or 0
+                    data = resp.result
+                    jack = data.get('jack', 0)
+                    pot = data.get('pot', 0)
+                    self._balances[addr] = jack
+                    total_jack += jack
+                    total_pot += pot
                 else:
                     self._balances[addr] = 0
             except Exception:
                 self._balances[addr] = 0
 
         # 총 잔액 업데이트
-        total = sum(b for b in self._balances.values() if b is not None)
-        self.query_one("#total-balance", Label).update(f"Total: {total:,.2f} JACK")
+        self.query_one("#total-jack", Label).update(f"JACK: {total_jack:,.2f}")
+        self.query_one("#total-pot", Label).update(f"POT: {total_pot:,.2f}")
 
         # 목록도 업데이트 (잔액 반영)
         self._update_wallet_list()
@@ -275,6 +303,13 @@ class WalletWidget(ScrollableContainer):
             self._add_watch_only()
         elif btn_id == "btn-add-address":
             self._add_new_address()
+        elif btn_id == "btn-exchange":
+            self._hide_all_panels()
+            self.query_one("#exchange-panel").remove_class("hidden")
+        elif btn_id == "btn-confirm-exchange":
+            self.run_worker(self._exchange_to_pot())
+        elif btn_id == "btn-cancel-exchange":
+            self.query_one("#exchange-panel").add_class("hidden")
         elif btn_id == "btn-open-folder":
             self._open_wallet_folder()
         elif btn_id == "btn-refresh":
@@ -285,6 +320,7 @@ class WalletWidget(ScrollableContainer):
         """모든 패널 숨기기"""
         self.query_one("#create-wallet-panel").add_class("hidden")
         self.query_one("#settings-panel").add_class("hidden")
+        self.query_one("#exchange-panel").add_class("hidden")
 
     def _open_wallet_folder(self) -> None:
         """지갑 폴더 열기"""
@@ -320,6 +356,9 @@ class WalletWidget(ScrollableContainer):
                 addresses = self._wallets[wallet_name].get_addresses()
                 if addresses:
                     self.app.selected_address = addresses[0]
+
+                # 노드에도 활성 지갑 변경 알림
+                self.run_worker(self._set_node_wallet(wallet_name))
 
                 self.query_one("#wallet-status", Label).update(
                     f"Wallet: {wallet_name}.json selected"
@@ -419,3 +458,42 @@ class WalletWidget(ScrollableContainer):
         self.app.selected_address = new_addr
         self.query_one("#wallet-status", Label).update(f"New: {new_addr[:20]}...")
         self.refresh_data()
+
+    async def _set_node_wallet(self, wallet_name: str) -> None:
+        """노드의 활성 지갑 변경"""
+        try:
+            resp = await self.rpc.set_wallet(wallet_name)
+            if resp.success:
+                self.query_one("#wallet-status", Label).update(
+                    f"Wallet: {wallet_name} (node synced)"
+                )
+            # 실패해도 TUI 선택은 유지 (노드 미연결 상태일 수 있음)
+        except Exception:
+            pass  # 노드 연결 안 됨
+
+    async def _exchange_to_pot(self) -> None:
+        """JACK → POT 교환"""
+        if not self.app.selected_address:
+            self.query_one("#wallet-status", Label).update("Select an address first")
+            return
+
+        amount_str = self.query_one("#exchange-amount", Input).value
+        try:
+            amount = float(amount_str)
+            if amount < 100:
+                self.query_one("#wallet-status", Label).update("Min: 100 JACK")
+                return
+        except ValueError:
+            self.query_one("#wallet-status", Label).update("Enter valid amount")
+            return
+
+        resp = await self.rpc.exchange_to_pot(amount)
+        if resp.success:
+            data = resp.result
+            pot = data.get("pot_received", 0)
+            self.query_one("#wallet-status", Label).update(f"Exchanged! Got {pot} POT")
+            self.query_one("#exchange-panel").add_class("hidden")
+            self.query_one("#exchange-amount", Input).value = ""
+            self.refresh_data()
+        else:
+            self.query_one("#wallet-status", Label).update(f"Error: {resp.error}")

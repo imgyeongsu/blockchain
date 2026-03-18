@@ -93,6 +93,12 @@ class RPCClient:
             return await self.call("getbalance", address)
         return await self.call("getbalance")
 
+    async def get_balances(self, address: str = None) -> RPCResponse:
+        """JACK + POT 잔액 조회"""
+        if address:
+            return await self.call("getbalances", address)
+        return await self.call("getbalances")
+
     async def get_new_address(self, label: str = "") -> RPCResponse:
         """새 주소 생성"""
         return await self.call("getnewaddress", label)
@@ -110,6 +116,18 @@ class RPCClient:
     async def exchange_to_pot(self, jack_amount: float) -> RPCResponse:
         """JACK -> POT 교환"""
         return await self.call("exchangetopot", jack_amount)
+
+    async def list_wallets(self) -> RPCResponse:
+        """로드된 지갑 목록"""
+        return await self.call("listwallets")
+
+    async def set_wallet(self, name: str) -> RPCResponse:
+        """활성 지갑 변경"""
+        return await self.call("setwallet", name)
+
+    async def get_active_wallet(self) -> RPCResponse:
+        """현재 활성 지갑"""
+        return await self.call("getactivewallet")
 
     # =========================================================================
     # Network

@@ -17,12 +17,11 @@ from dataclasses import dataclass
 from collections import deque
 
 from ..constants import (
-    LOTTO_PRIZE_1ST_RATIO,
-    LOTTO_POOL_RATIO,
-    LOTTO_BURN_RATIO,
-    LOTTO_MINER_RATIO,
+    LOTTO_PRIZE_1ST_PERCENT,
+    LOTTO_POOL_PERCENT,
+    LOTTO_BURN_PERCENT,
     LOTTO_COST_JACK,
-    FEE_JACKPOT_RATIO,
+    FEE_JACKPOT_PERCENT,
     COIN,
 )
 
@@ -92,9 +91,9 @@ class JackpotPool:
         Returns:
             EntryDistribution: 분배 결과
         """
-        pool_amount = int(entry_amount * LOTTO_POOL_RATIO)
-        burn_amount = int(entry_amount * LOTTO_BURN_RATIO)
-        miner_amount = entry_amount - pool_amount - burn_amount  # 나머지 (반올림 처리)
+        pool_amount = entry_amount * LOTTO_POOL_PERCENT // 100
+        burn_amount = entry_amount * LOTTO_BURN_PERCENT // 100
+        miner_amount = entry_amount - pool_amount - burn_amount  # 나머지
 
         if pool_amount > 0:
             self._balance += pool_amount
@@ -167,7 +166,7 @@ class JackpotPool:
             당첨금 (Commit 시점 잔액의 50%)
         """
         snapshot = self.get_snapshot(commit_height)
-        return int(snapshot * LOTTO_PRIZE_1ST_RATIO)
+        return snapshot * LOTTO_PRIZE_1ST_PERCENT // 100
 
     def process_jackpot_payout(
         self,
@@ -239,7 +238,7 @@ class JackpotPool:
             'total_fees_collected': total_fees,
             'total_payouts': total_payouts,
             'payout_count': payout_count,
-            'next_jackpot': int(self._balance * LOTTO_PRIZE_1ST_RATIO),
+            'next_jackpot': self._balance * LOTTO_PRIZE_1ST_PERCENT // 100,
             'history_size': len(self._history),
             'snapshot_count': len(self._snapshots),
         }
@@ -259,7 +258,7 @@ class JackpotPool:
 
 def calculate_pool_contribution(block_fees: int) -> int:
     """블록 수수료에서 풀 기여분 계산"""
-    return int(block_fees * FEE_JACKPOT_RATIO)
+    return block_fees * FEE_JACKPOT_PERCENT // 100
 
 
 def calculate_entry_distribution(entry_amount: int = None) -> EntryDistribution:
@@ -275,8 +274,8 @@ def calculate_entry_distribution(entry_amount: int = None) -> EntryDistribution:
     if entry_amount is None:
         entry_amount = LOTTO_COST_JACK
 
-    pool_amount = int(entry_amount * LOTTO_POOL_RATIO)
-    burn_amount = int(entry_amount * LOTTO_BURN_RATIO)
+    pool_amount = entry_amount * LOTTO_POOL_PERCENT // 100
+    burn_amount = entry_amount * LOTTO_BURN_PERCENT // 100
     miner_amount = entry_amount - pool_amount - burn_amount
 
     return EntryDistribution(
@@ -295,4 +294,4 @@ def calculate_payout(pool_balance: int) -> int:
     [DEPRECATED] 기존 단일 당첨금 방식
     새 코드에서는 calculate_jackpot_payout() 사용
     """
-    return int(pool_balance * LOTTO_PRIZE_1ST_RATIO)
+    return pool_balance * LOTTO_PRIZE_1ST_PERCENT // 100
