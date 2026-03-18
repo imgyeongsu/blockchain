@@ -676,13 +676,19 @@ class RPCServer:
         }
 
     def _getjackpotpool(self) -> dict:
-        """잭팟 풀 상태"""
+        """잭팟 풀 상태 (UTXO 기반)"""
+        # UTXO 기반 잔액 계산 (Exchange TX의 JACKPOT_POOL 출력 포함)
+        pool_utxos = self.blockchain.utxo_set.get_pool_utxos()
+        utxo_balance = sum(utxo.output.jack_value for utxo in pool_utxos)
+
+        # 인메모리 pool 통계 (엔트리, 수집 등)
         pool_stats = self.gacha.pool.get_stats()
+
         return {
-            'balance': pool_stats['balance'] / 100_000_000,
-            'balance_satoshi': pool_stats['balance'],
-            'next_jackpot': pool_stats['balance'] * 0.5 / 100_000_000,
-            'next_jackpot_satoshi': int(pool_stats['balance'] * 0.5),
+            'balance': utxo_balance / 100_000_000,
+            'balance_satoshi': utxo_balance,
+            'next_jackpot': utxo_balance * 50 // 100 / 100_000_000,
+            'next_jackpot_satoshi': utxo_balance * 50 // 100,
             'total_entries': pool_stats.get('total_entries', 0) / 100_000_000,
             'total_collected': pool_stats.get('total_fees_collected', 0) / 100_000_000,
             'snapshot_count': pool_stats.get('snapshot_count', 0),
