@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 from textual.app import ComposeResult
-from textual.widgets import Label, Button, Input
+from textual.widgets import Label, Button
 from textual.containers import ScrollableContainer, Horizontal, Vertical
 
 from ..client import RPCClient
@@ -51,11 +51,10 @@ class MiningWidget(ScrollableContainer):
         # 채굴 컨트롤
         yield Vertical(
             Label("MINING CONTROL", classes="box-title"),
+            Horizontal(Label("Current:", classes="stat-label"), Label("--", id="current-mining-addr", classes="stat-value cyan")),
+            Horizontal(Label("Selected:", classes="stat-label"), Label("--", id="selected-addr", classes="stat-value yellow")),
             Horizontal(
-                Label("Address:", classes="stat-label"),
-                Input(placeholder="Wallet address...", id="input-address"),
-            ),
-            Horizontal(
+                Button("[A] Apply Address", id="btn-apply-address", variant="primary"),
                 Button("[M] Start Mining", id="btn-start-mining", variant="warning"),
                 Button("[S] Stop Mining", id="btn-stop-mining", variant="default"),
                 classes="action-buttons",
@@ -94,10 +93,14 @@ class MiningWidget(ScrollableContainer):
     def _sync_wallet_address(self) -> None:
         """Wallet에서 선택된 주소 동기화"""
         app = self.app
+        selected_label = self.query_one("#selected-addr", Label)
+
         if app.selected_address:
-            address_input = self.query_one("#input-address", Input)
-            if not address_input.value:
-                address_input.value = app.selected_address
+            addr = app.selected_address
+            display = f"{addr[:12]}...{addr[-6:]}" if len(addr) > 20 else addr
+            selected_label.update(display)
+        else:
+            selected_label.update("(select in Wallet tab)")
 
     def refresh_data(self) -> None:
         """데이터 새로고침"""
@@ -177,10 +180,32 @@ class MiningWidget(ScrollableContainer):
             self._start_node()
         elif event.button.id == "btn-stop-node":
             self.run_worker(self._stop_node_async())
+        elif event.button.id == "btn-apply-address":
+            self._apply_address()
         elif event.button.id == "btn-start-mining":
             self.run_worker(self._start_mining())
         elif event.button.id == "btn-stop-mining":
             self.run_worker(self._stop_mining())
+
+    def _apply_address(self) -> None:
+        """선택된 주소를 채굴 주소로 적용"""
+        app = self.app
+        if not app.selected_address:
+            self.query_one("#mining-msg", Label).update("Select address in Wallet tab first!")
+            return
+
+        # 채굴 주소 저장
+        addr = app.selected_address
+        app.mining_address = addr
+
+        # UI 업데이트
+        display = f"{addr[:12]}...{addr[-6:]}" if len(addr) > 20 else addr
+        self.query_one("#current-mining-addr", Label).update(display)
+        self.query_one("#mining-msg", Label).update(f"Applied: {display}")
+
+        # 채굴 중이면 재시작 필요 알림
+        if self.is_mining:
+            self.query_one("#mining-msg", Label).update(f"Applied: {display} (restart mining to take effect)")
 
     def _is_node_running(self) -> bool:
         """노드 프로세스 실행 중인지 확인"""
@@ -254,12 +279,11 @@ class MiningWidget(ScrollableContainer):
 
     async def _start_mining(self) -> None:
         """채굴 시작 (노드 OFF면 먼저 시작)"""
-        # 주소 확인
-        address_input = self.query_one("#input-address", Input)
-        address = address_input.value.strip()
+        # 주소 확인 (Apply된 주소 사용)
+        address = getattr(self.app, 'mining_address', None)
 
         if not address:
-            self.query_one("#mining-msg", Label).update("Enter miner address!")
+            self.query_one("#mining-msg", Label).update("Apply address first!")
             return
 
         # 노드가 안 켜져 있으면 먼저 시작

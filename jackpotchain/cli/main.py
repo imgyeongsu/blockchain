@@ -135,6 +135,8 @@ def run_node(args):
         mempool=mempool,
         wallet=wallet,
         node=node,
+        data_dir=data_dir,
+        wallet_dir=wallet_dir,
         port=args.rpc_port
     )
 

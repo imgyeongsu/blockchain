@@ -53,6 +53,7 @@ class JackpotChainApp(App):
         self.current_wallet: Wallet | None = None
         self.current_wallet_file: Path | None = None
         self.selected_address: str | None = None
+        self.mining_address: str | None = None
 
         # 기본 지갑 로드 시도
         self._load_default_wallet()
