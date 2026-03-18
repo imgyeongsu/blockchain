@@ -80,13 +80,19 @@ LOTTO_MAX_CLAIM_GAP = 68         # N+68까지 Claim 가능 (50블록 여유)
 GACHA_MIN_REVEAL_GAP = LOTTO_MIN_CLAIM_GAP  # 하위 호환
 GACHA_MAX_REVEAL_GAP = LOTTO_MAX_CLAIM_GAP  # 하위 호환
 
-# 참가비 분배 (100 JACK 기준)
-LOTTO_POOL_RATIO = 0.80          # 80% → 잭팟 풀
-LOTTO_BURN_RATIO = 0.19          # 19% → 소각
-LOTTO_MINER_RATIO = 0.01         # 1% → 채굴자 보상
+# 참가비 분배 (100 JACK 기준) - 백분율
+LOTTO_POOL_PERCENT = 80          # 80% → 잭팟 풀
+LOTTO_BURN_PERCENT = 19          # 19% → 소각
+LOTTO_MINER_PERCENT = 1          # 1% → 채굴자 보상
+
+# 참가비 분배 (소수) - DEPRECATED, 호환용
+LOTTO_POOL_RATIO = 0.80
+LOTTO_BURN_RATIO = 0.19
+LOTTO_MINER_RATIO = 0.01
 
 # 등급별 보상
-LOTTO_PRIZE_1ST_RATIO = 0.50     # 1등: 잭팟 풀의 50%
+LOTTO_PRIZE_1ST_PERCENT = 50     # 1등: 잭팟 풀의 50%
+LOTTO_PRIZE_1ST_RATIO = 0.50     # DEPRECATED, 호환용
 LOTTO_PRIZE_2ND = 100_000 * COIN # 2등: 100,000 JACK
 LOTTO_PRIZE_3RD = 20_000 * COIN  # 3등: 20,000 JACK
 LOTTO_PRIZE_4TH = 2_000 * COIN   # 4등: 2,000 JACK

@@ -24,7 +24,7 @@ from jackpotchain.gacha.game import LottoGame, LottoPlayResult
 from jackpotchain.constants import (
     LOTTO_DIGIT_COUNT, LOTTO_DIGIT_BASE,
     LOTTO_MIN_CLAIM_GAP, LOTTO_MAX_CLAIM_GAP,
-    LOTTO_PRIZE_1ST_RATIO, LOTTO_PRIZE_2ND, LOTTO_PRIZE_3RD,
+    LOTTO_PRIZE_1ST_PERCENT, LOTTO_PRIZE_2ND, LOTTO_PRIZE_3RD,
     LOTTO_PRIZE_4TH, LOTTO_PRIZE_5TH,
 )
 
@@ -159,7 +159,7 @@ class TestPayoutCalculation:
         """1등: 풀의 50%"""
         pool_snapshot = 1_000_000_00_000_000  # 1,000,000 JACK
         jack, pot = calculate_payout(LottoPrize.JACKPOT, pool_snapshot)
-        assert jack == int(pool_snapshot * LOTTO_PRIZE_1ST_RATIO)
+        assert jack == pool_snapshot * LOTTO_PRIZE_1ST_PERCENT // 100
         assert pot == 0
 
     def test_second_payout(self):

@@ -16,9 +16,8 @@ from ..crypto.address import address_to_pubkey_hash, validate_address, is_system
 from ..script.standard import create_p2pkh_script_pubkey
 from ..constants import (
     BLOCK_REWARD,
-    FEE_MINER_RATIO,
-    FEE_JACKPOT_RATIO,
-    FEE_BURN_RATIO,
+    FEE_MINER_PERCENT,
+    FEE_JACKPOT_PERCENT,
 )
 from .difficulty import compact_to_target
 
@@ -65,9 +64,9 @@ def create_coinbase_tx(
 
     outputs = []
 
-    # 수수료 분배 계산
-    miner_fee = int(total_fees * FEE_MINER_RATIO)
-    jackpot_fee = int(total_fees * FEE_JACKPOT_RATIO)
+    # 수수료 분배 계산 (정수 연산)
+    miner_fee = total_fees * FEE_MINER_PERCENT // 100
+    jackpot_fee = total_fees * FEE_JACKPOT_PERCENT // 100
     burn_fee = total_fees - miner_fee - jackpot_fee  # 나머지는 burn
 
     # 1. 채굴자 보상 (블록 보상 + 채굴자 수수료)
