@@ -308,6 +308,10 @@ class GachaService:
         # 대기 중인 commits (지갑별)
         self._pending_commits: Dict[str, List[PendingCommit]] = {}
 
+        # pending TX에 사용된 UTXO 추적 (double-spend 방지)
+        # key: (tx_id, output_index), value: commit_hash
+        self._reserved_utxos: Dict[Tuple[bytes, int], bytes] = {}
+
         # 저장 경로
         self._data_dir = Path(data_dir) if data_dir else None
         if self._data_dir:
@@ -477,6 +481,10 @@ class GachaService:
 
         # 저장
         self._add_pending_commit(player_address, pending)
+
+        # UTXO 예약 (double-spend 방지)
+        used_utxos = [utxo for _, utxo in inputs]
+        self._reserve_utxos(used_utxos, commit_hash)
 
         # 이벤트
         self.events.emit(GachaEventData(
@@ -796,16 +804,29 @@ class GachaService:
         if pending:
             pending.tx_id = tx_id
             pending.block_height = block_height
+            # TX 확인됨 → UTXO 예약 해제 (이미 소비됨)
+            self.release_reserved_utxos(commit_hash)
             self._save_state()
 
     def remove_commit(self, commit_hash: bytes):
-        """Commit 제거 (Reveal 완료 시)"""
+        """Commit 제거 (Reveal 완료/만료 시)"""
         for address, commits in self._pending_commits.items():
             for commit in commits:
                 if commit.commit_hash == commit_hash:
                     commits.remove(commit)
+                    # UTXO 예약 해제
+                    self.release_reserved_utxos(commit_hash)
                     self._save_state()
                     return
+
+    def cancel_pending_commit(self, commit_hash: bytes):
+        """
+        Pending commit 취소 (broadcast 실패 시 호출)
+
+        UTXO 예약 해제 + PendingCommit 제거
+        """
+        self.release_reserved_utxos(commit_hash)
+        self.remove_commit(commit_hash)
 
     def get_stats(self) -> dict:
         """통계"""
@@ -820,6 +841,23 @@ class GachaService:
     # 유틸리티
     # =========================================================================
 
+    def _is_utxo_reserved(self, utxo: UTXO) -> bool:
+        """UTXO가 pending TX에 사용 중인지 확인"""
+        key = (utxo.tx_id, utxo.output_index)
+        return key in self._reserved_utxos
+
+    def _reserve_utxos(self, utxos: List[UTXO], commit_hash: bytes):
+        """UTXO를 pending으로 예약"""
+        for utxo in utxos:
+            key = (utxo.tx_id, utxo.output_index)
+            self._reserved_utxos[key] = commit_hash
+
+    def release_reserved_utxos(self, commit_hash: bytes):
+        """Commit 완료/만료 시 예약 해제"""
+        to_remove = [k for k, v in self._reserved_utxos.items() if v == commit_hash]
+        for key in to_remove:
+            del self._reserved_utxos[key]
+
     def _select_pot_utxos(
         self,
         wallet,
@@ -827,13 +865,16 @@ class GachaService:
         amount: int,
         current_height: int
     ) -> List[UTXO]:
-        """POT UTXO 선택"""
+        """POT UTXO 선택 (pending TX 제외)"""
         utxos = wallet.get_utxos(utxo_set)
         pot_utxos = []
         total = 0
 
         for utxo in utxos:
             if not utxo.is_mature(current_height):
+                continue
+            # pending TX에 사용된 UTXO 스킵
+            if self._is_utxo_reserved(utxo):
                 continue
             pot_amount = utxo.output.assets.get(ASSET_ID_POT, 0)
             if pot_amount > 0:
@@ -851,13 +892,16 @@ class GachaService:
         amount: int,
         current_height: int
     ) -> List[UTXO]:
-        """JACK UTXO 선택"""
+        """JACK UTXO 선택 (pending TX 제외)"""
         utxos = wallet.get_utxos(utxo_set)
         jack_utxos = []
         total = 0
 
         for utxo in utxos:
             if not utxo.is_mature(current_height):
+                continue
+            # pending TX에 사용된 UTXO 스킵
+            if self._is_utxo_reserved(utxo):
                 continue
             if utxo.output.jack_value > 0:
                 jack_utxos.append(utxo)

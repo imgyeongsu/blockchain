@@ -58,13 +58,34 @@ class WalletWidget(ScrollableContainer):
             Horizontal(
                 Button("[+] New Wallet", id="btn-create-wallet", variant="success"),
                 Button("[+] Add Address", id="btn-add-address", variant="warning"),
-                Button("[E] Exchange", id="btn-exchange", variant="warning"),
-                Button("[S] Settings", id="btn-settings", variant="default"),
-                Button("[F] Open Folder", id="btn-open-folder", variant="default"),
-                Button("[R] Refresh", id="btn-refresh", variant="primary"),
+                Button("Send", id="btn-send", variant="primary"),
+                Button("Exchange", id="btn-exchange", variant="warning"),
+                Button("Settings", id="btn-settings", variant="default"),
+                Button("Open Folder", id="btn-open-folder", variant="default"),
+                Button("Refresh", id="btn-refresh", variant="success"),
                 classes="action-buttons",
             ),
             classes="stat-box",
+        )
+
+        # Send 패널 (숨김)
+        yield Vertical(
+            Label("SEND JACK", classes="box-title"),
+            Horizontal(
+                Label("To:", classes="stat-label"),
+                Input(placeholder="Recipient address (X...)", id="send-to"),
+            ),
+            Horizontal(
+                Label("Amount:", classes="stat-label"),
+                Input(placeholder="10", id="send-amount"),
+            ),
+            Horizontal(
+                Button("Send", id="btn-confirm-send", variant="primary"),
+                Button("Cancel", id="btn-cancel-send", variant="error"),
+                classes="action-buttons",
+            ),
+            classes="stat-box hidden",
+            id="send-panel",
         )
 
         # Exchange 패널 (숨김)
@@ -303,6 +324,13 @@ class WalletWidget(ScrollableContainer):
             self._add_watch_only()
         elif btn_id == "btn-add-address":
             self._add_new_address()
+        elif btn_id == "btn-send":
+            self._hide_all_panels()
+            self.query_one("#send-panel").remove_class("hidden")
+        elif btn_id == "btn-confirm-send":
+            self.run_worker(self._send_jack())
+        elif btn_id == "btn-cancel-send":
+            self.query_one("#send-panel").add_class("hidden")
         elif btn_id == "btn-exchange":
             self._hide_all_panels()
             self.query_one("#exchange-panel").remove_class("hidden")
@@ -321,6 +349,7 @@ class WalletWidget(ScrollableContainer):
         self.query_one("#create-wallet-panel").add_class("hidden")
         self.query_one("#settings-panel").add_class("hidden")
         self.query_one("#exchange-panel").add_class("hidden")
+        self.query_one("#send-panel").add_class("hidden")
 
     def _open_wallet_folder(self) -> None:
         """지갑 폴더 열기"""
@@ -470,6 +499,48 @@ class WalletWidget(ScrollableContainer):
             # 실패해도 TUI 선택은 유지 (노드 미연결 상태일 수 있음)
         except Exception:
             pass  # 노드 연결 안 됨
+
+    async def _send_jack(self) -> None:
+        """JACK 송금"""
+        from ...crypto.address import validate_address
+
+        if not self.app.selected_address:
+            self.query_one("#wallet-status", Label).update("Select an address first")
+            return
+
+        to_addr = self.query_one("#send-to", Input).value.strip()
+        if not to_addr:
+            self.query_one("#wallet-status", Label).update("Enter recipient address")
+            return
+
+        if not validate_address(to_addr):
+            self.query_one("#wallet-status", Label).update("Invalid address format")
+            return
+
+        amount_str = self.query_one("#send-amount", Input).value
+        try:
+            amount = float(amount_str)
+            if amount <= 0:
+                self.query_one("#wallet-status", Label).update("Amount must be > 0")
+                return
+        except ValueError:
+            self.query_one("#wallet-status", Label).update("Enter valid amount")
+            return
+
+        resp = await self.rpc.send_to_address(to_addr, amount)
+        if resp.success:
+            # result가 string(txid)이거나 dict일 수 있음
+            if isinstance(resp.result, str):
+                tx_id = resp.result[:16]
+            else:
+                tx_id = resp.result.get("txid", "")[:16]
+            self.query_one("#wallet-status", Label).update(f"Sent {amount} JACK! TX: {tx_id}...")
+            self.query_one("#send-panel").add_class("hidden")
+            self.query_one("#send-to", Input).value = ""
+            self.query_one("#send-amount", Input).value = ""
+            self.refresh_data()
+        else:
+            self.query_one("#wallet-status", Label).update(f"Error: {resp.error}")
 
     async def _exchange_to_pot(self) -> None:
         """JACK → POT 교환"""
