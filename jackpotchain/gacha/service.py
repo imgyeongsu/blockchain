@@ -246,7 +246,8 @@ class GachaService:
         current_height: int,
         chosen_numbers: List[int] = None,
         target: int = None,
-        gacha_type: str = "lotto"
+        gacha_type: str = "lotto",
+        is_spent_in_mempool: Callable[[bytes, int], bool] = None
     ) -> Tuple[Optional[Transaction], Optional[PendingCommit], str]:
         """Commit TX 생성"""
         if chosen_numbers is not None:
@@ -261,8 +262,8 @@ class GachaService:
                 for _ in range(LOTTO_DIGIT_COUNT)
             ]
 
-        # POT UTXO 선택
-        pot_utxos = self._select_pot_utxos(wallet, utxo_set, LOTTO_COST_POT, current_height)
+        # POT UTXO 선택 (mempool에서 사용 중인 UTXO 제외)
+        pot_utxos = self._select_pot_utxos(wallet, utxo_set, LOTTO_COST_POT, current_height, is_spent_in_mempool)
         if not pot_utxos:
             return None, None, f"Insufficient POT balance (need {LOTTO_COST_POT / 1e8} POT)"
 
@@ -283,7 +284,7 @@ class GachaService:
             total_pot += utxo.output.assets.get(ASSET_ID_POT, 0)
 
         if total_jack < MIN_TX_FEE:
-            jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height)
+            jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height, is_spent_in_mempool)
             for utxo in jack_utxos:
                 inp = TxInput(
                     prev_tx_id=utxo.tx_id,
@@ -423,7 +424,8 @@ class GachaService:
         for key in to_remove:
             del self._reserved_utxos[key]
 
-    def _select_pot_utxos(self, wallet, utxo_set, amount, current_height) -> List[UTXO]:
+    def _select_pot_utxos(self, wallet, utxo_set, amount, current_height,
+                          is_spent_in_mempool: Callable[[bytes, int], bool] = None) -> List[UTXO]:
         utxos = wallet.get_utxos(utxo_set)
         pot_utxos = []
         total = 0
@@ -431,6 +433,9 @@ class GachaService:
             if not utxo.is_mature(current_height):
                 continue
             if self._is_utxo_reserved(utxo):
+                continue
+            # mempool에서 이미 사용 중인 UTXO 제외
+            if is_spent_in_mempool and is_spent_in_mempool(utxo.tx_id, utxo.output_index):
                 continue
             pot_amount = utxo.output.assets.get(ASSET_ID_POT, 0)
             if pot_amount > 0:
@@ -440,7 +445,8 @@ class GachaService:
                     break
         return pot_utxos if total >= amount else []
 
-    def _select_jack_utxos(self, wallet, utxo_set, amount, current_height) -> List[UTXO]:
+    def _select_jack_utxos(self, wallet, utxo_set, amount, current_height,
+                           is_spent_in_mempool: Callable[[bytes, int], bool] = None) -> List[UTXO]:
         utxos = wallet.get_utxos(utxo_set)
         jack_utxos = []
         total = 0
@@ -448,6 +454,9 @@ class GachaService:
             if not utxo.is_mature(current_height):
                 continue
             if self._is_utxo_reserved(utxo):
+                continue
+            # mempool에서 이미 사용 중인 UTXO 제외
+            if is_spent_in_mempool and is_spent_in_mempool(utxo.tx_id, utxo.output_index):
                 continue
             if utxo.output.jack_value > 0:
                 jack_utxos.append(utxo)
