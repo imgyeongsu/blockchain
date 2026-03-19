@@ -116,7 +116,7 @@ def create_lotto_payout_txs(
     Returns:
         지급 TX 리스트
     """
-    from ..constants import LOTTO_MIN_CLAIM_GAP, LOTTO_PRIZE_1ST_PERCENT, ASSET_ID_POT
+    from ..constants import LOTTO_PAYOUT_GAP, LOTTO_PRIZE_1ST_PERCENT, ASSET_ID_POT
     from ..gacha.commit_reveal import (
         get_comparison_heights,
         calculate_result_digits,
@@ -127,7 +127,8 @@ def create_lotto_payout_txs(
     )
     from ..script.standard import create_lotto_payout_script
 
-    target_height = height - LOTTO_MIN_CLAIM_GAP
+    # N+28에서 지급 (N+18 해시 확정 + 10블록 포크 대비)
+    target_height = height - LOTTO_PAYOUT_GAP
     if target_height < 1:
         return []
 

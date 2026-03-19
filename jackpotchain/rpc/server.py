@@ -795,9 +795,10 @@ class RPCServer:
         from ..gacha.commit_reveal import get_comparison_heights, calculate_result_digits, count_matches, determine_prize, calculate_payout
 
         comparison_heights = get_comparison_heights(commit_info.block_height)
-        payout_block = commit_info.block_height + LOTTO_MIN_CLAIM_GAP
+        from ..constants import LOTTO_PAYOUT_GAP
+        payout_block = commit_info.block_height + LOTTO_PAYOUT_GAP
 
-        if current_height < comparison_heights[-1]:
+        if current_height <= comparison_heights[-1]:
             return {
                 'success': False,
                 'status': 'pending',
@@ -845,17 +846,17 @@ class RPCServer:
         pending_commits = self.gacha_service.get_pending_commits(address)
         current_height = self.blockchain.get_height()
         from ..gacha.commit_reveal import get_comparison_heights
-        from ..constants import LOTTO_MIN_CLAIM_GAP
+        from ..constants import LOTTO_PAYOUT_GAP
 
         result = []
         for c in pending_commits:
             commit_height = c.block_height if c.block_height > 0 else current_height
             comparison_heights = get_comparison_heights(commit_height)
-            payout_block = commit_height + LOTTO_MIN_CLAIM_GAP
+            payout_block = commit_height + LOTTO_PAYOUT_GAP
 
             if c.block_height == 0:
                 status = "pending_mine"
-            elif current_height < comparison_heights[-1]:
+            elif current_height <= comparison_heights[-1]:
                 status = "pending"
             else:
                 status = "ready"
