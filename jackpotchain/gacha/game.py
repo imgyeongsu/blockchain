@@ -132,9 +132,9 @@ class LottoGame:
         # 주소 유효성 검증
         effective_address = change_address or player_address
         if not validate_address(player_address):
-            return None, b'', b'', 0, f"Invalid player address: {player_address}"
+            return None, b'', b'', [], f"Invalid player address: {player_address}"
         if change_address and not validate_address(change_address):
-            return None, b'', b'', 0, f"Invalid change address: {change_address}"
+            return None, b'', b'', [], f"Invalid change address: {change_address}"
 
         # Commit 생성
         commit_hash, nonce, chosen_numbers = generate_commit(chosen_numbers)

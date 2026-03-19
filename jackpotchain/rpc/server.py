@@ -986,7 +986,7 @@ class RPCServer:
         from ..asset.exchange import calculate_exchange, create_exchange_tx
         from ..constants import COIN
 
-        jack_satoshi = int(jack_amount * COIN)
+        jack_satoshi = round(jack_amount * COIN)
 
         # 교환 계산
         result = calculate_exchange(jack_satoshi)
@@ -1087,7 +1087,7 @@ class RPCServer:
             # wallet_dir 없으면 기존 wallet만 사용
             if self.wallet:
                 # 기존 wallet의 파일명 추출
-                wallet_path = Path(self.wallet._wallet_file) if hasattr(self.wallet, '_wallet_file') else None
+                wallet_path = Path(self.wallet.wallet_file) if hasattr(self.wallet, 'wallet_file') and self.wallet.wallet_file else None
                 if wallet_path:
                     name = wallet_path.stem
                     self.wallets[name] = self.wallet
