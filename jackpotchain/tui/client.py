@@ -83,6 +83,10 @@ class RPCClient:
         """블록 높이"""
         return await self.call("getblockcount")
 
+    async def get_recent_blocks(self, count: int = 10) -> RPCResponse:
+        """최근 블록 요약"""
+        return await self.call("getrecentblocks", [count])
+
     # =========================================================================
     # Wallet
     # =========================================================================

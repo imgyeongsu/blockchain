@@ -25,18 +25,18 @@ from ..constants import (
 
 
 def _resolve_utxo(tx_id: bytes, output_index: int, utxo_set: UTXOSet, mempool=None) -> Optional[UTXO]:
-    """UTXO 조회 (확정 UTXO → mempool fallback)"""
+    """UTXO 조회 (확정 UTXO → mempool/블록 내 TX fallback)"""
     utxo = utxo_set.get_utxo(tx_id, output_index)
     if utxo is not None:
         return utxo
-    # mempool 내 부모 TX 출력에서 조회
+    # mempool 또는 블록 내 부모 TX 출력에서 조회
     if mempool is not None:
-        parent_entry = mempool._entries.get(tx_id)
-        if parent_entry and output_index < len(parent_entry.tx.outputs):
+        tx = mempool.get_tx(tx_id)
+        if tx and output_index < len(tx.outputs):
             return UTXO(
                 tx_id=tx_id,
                 output_index=output_index,
-                output=parent_entry.tx.outputs[output_index],
+                output=tx.outputs[output_index],
                 block_height=0,
                 is_coinbase=False,
             )

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..core.block import Block, BlockHeader
-from ..core.utxo import UTXOSet
+from ..core.utxo import UTXO, UTXOSet
 from ..consensus.difficulty import compact_to_target, hash_meets_target
 from ..constants import (
     MAX_BLOCK_SIZE,
@@ -24,6 +24,19 @@ from .transaction import (
     TxValidationResult,
     TxValidationError,
 )
+
+
+class _BlockTxTracker:
+    """블록 내 TX 출력 추적 (블록 검증 시 체인 TX 지원)"""
+
+    def __init__(self):
+        self._txs = {}
+
+    def add_tx(self, tx):
+        self._txs[tx.get_txid()] = tx
+
+    def get_tx(self, tx_id: bytes):
+        return self._txs.get(tx_id)
 
 
 class BlockValidationError(Enum):
@@ -192,9 +205,18 @@ def validate_block_transactions(
     """
     total_fees = 0
 
+    # 블록 내 TX 체인 지원: 앞선 TX 출력을 임시 추적
+    # (같은 블록 내 TX가 앞선 TX 출력을 참조할 수 있음)
+    block_tx_outputs = _BlockTxTracker()
+
+    # Coinbase 출력 등록
+    coinbase = block.transactions[0]
+    block_tx_outputs.add_tx(coinbase)
+
     # 일반 TX 검증 (Coinbase 제외)
     for tx in block.transactions[1:]:
-        result = validate_transaction(tx, utxo_set, block_height, blockchain)
+        result = validate_transaction(tx, utxo_set, block_height, blockchain,
+                                      mempool=block_tx_outputs)
         if not result.is_valid:
             return BlockValidationResult(
                 is_valid=False,
@@ -202,6 +224,9 @@ def validate_block_transactions(
                 message=f"Invalid TX: {result.message}"
             )
         total_fees += result.fee
+
+        # 이 TX의 출력도 이후 TX에서 참조 가능하도록 등록
+        block_tx_outputs.add_tx(tx)
 
     # Coinbase 검증
     coinbase = block.transactions[0]

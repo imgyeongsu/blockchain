@@ -574,7 +574,7 @@ class Node:
             self._requesting.clear()  # 요청 잔여물 초기화 (5.5)
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
-        """TX 수신"""
+        """TX 수신 (orphan TX 대기열 포함)"""
         tx, _ = Transaction.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
 
@@ -588,9 +588,44 @@ class Node:
             if success:
                 # 다른 피어에게 재전파
                 await self._relay_tx(tx, exclude=address)
+                # orphan TX 재시도 (이 TX의 출력을 기다리던 TX)
+                await self._retry_orphan_txs(tx.get_txid(), address)
+            elif "UTXO not found" in msg:
+                # 부모 TX가 아직 없음 → orphan 대기열에 추가
+                if not hasattr(self, '_orphan_txs'):
+                    self._orphan_txs = {}
+                txid = tx.get_txid()
+                if len(self._orphan_txs) < 100:  # 최대 100개 제한
+                    self._orphan_txs[txid] = (tx, address)
 
         if self._on_tx:
             self._on_tx(tx, peer)
+
+    async def _retry_orphan_txs(self, parent_txid: bytes, address: PeerAddress):
+        """부모 TX가 들어오면 orphan TX 재시도"""
+        if not hasattr(self, '_orphan_txs') or not self._orphan_txs:
+            return
+
+        resolved = []
+        for txid, (tx, orig_addr) in list(self._orphan_txs.items()):
+            # 이 TX가 parent_txid를 참조하는지 확인
+            refs_parent = any(inp.prev_tx_id == parent_txid for inp in tx.inputs)
+            if not refs_parent:
+                continue
+
+            success, msg = self.mempool.add_tx(
+                tx,
+                self.blockchain.utxo_set,
+                self.blockchain.get_height()
+            )
+            if success:
+                resolved.append(txid)
+                await self._relay_tx(tx, exclude=orig_addr)
+            elif "UTXO not found" not in msg:
+                resolved.append(txid)  # 다른 이유로 실패 → 제거
+
+        for txid in resolved:
+            self._orphan_txs.pop(txid, None)
 
     async def _handle_getblocks(self, address: PeerAddress, payload: bytes):
         """GETBLOCKS 처리"""

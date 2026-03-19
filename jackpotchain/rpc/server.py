@@ -117,6 +117,7 @@ class RPCServer:
         self._methods['getblockhash'] = self._getblockhash
         self._methods['getblockcount'] = self._getblockcount
         self._methods['getbestblockhash'] = self._getbestblockhash
+        self._methods['getrecentblocks'] = self._getrecentblocks
 
         # Mempool
         self._methods['getmempoolinfo'] = self._getmempoolinfo
@@ -297,6 +298,25 @@ class RPCServer:
     def _getbestblockhash(self) -> str:
         """최신 블록 해시"""
         return self.blockchain.get_tip_hash().hex()
+
+    def _getrecentblocks(self, count: int = 10) -> list:
+        """최근 N개 블록 요약"""
+        height = self.blockchain.get_height()
+        count = min(count, 20)  # 최대 20개
+        blocks = []
+        for h in range(max(0, height - count + 1), height + 1):
+            block = self.blockchain.get_block_by_height(h)
+            if block is None:
+                continue
+            block_hash = block.get_hash()
+            last_hex = f"{block_hash[-1]:X}"  # 해시 마지막 1바이트의 하위 니블
+            blocks.append({
+                'height': h,
+                'difficulty': hex(block.header.difficulty_target),
+                'nTx': len(block.transactions),
+                'lotto_digit': last_hex[-1],  # 마지막 hex 1자리
+            })
+        return blocks
 
     # =========================================================================
     # Mempool Methods

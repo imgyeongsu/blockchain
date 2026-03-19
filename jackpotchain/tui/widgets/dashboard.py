@@ -53,6 +53,16 @@ class DashboardWidget(ScrollableContainer):
             id="jackpot-box",
         )
 
+        # 최근 블록
+        yield Vertical(
+            Label("RECENT BLOCKS", classes="box-title"),
+            Static("", id="recent-blocks-display"),
+            Label("◂ OLD                                          NEW ▸",
+                  classes="stat-value", id="block-direction"),
+            classes="stat-box",
+            id="recent-blocks-box",
+        )
+
     def on_mount(self) -> None:
         """마운트 시 데이터 로드"""
         self.refresh_data()
@@ -97,3 +107,35 @@ class DashboardWidget(ScrollableContainer):
             data = resp.result
             pool = data.get("balance", 0)
             self.query_one("#jackpot-pool", Label).update(f"{pool:,.0f} JACK")
+
+        # 최근 블록
+        resp = await self.rpc.get_recent_blocks(10)
+        if resp.success:
+            self._update_recent_blocks(resp.result or [])
+
+    def _update_recent_blocks(self, blocks: list) -> None:
+        """최근 블록 카드를 텍스트 아트로 표시"""
+        if not blocks:
+            self.query_one("#recent-blocks-display", Static).update("(no blocks)")
+            return
+
+        # 각 블록을 4줄 박스로 만들어 가로 배치
+        lines = [[], [], [], [], [], []]  # top, height, diff, txs, hash, bottom
+
+        for b in blocks:
+            height = b.get("height", 0)
+            diff = b.get("difficulty", "0x0")
+            n_tx = b.get("nTx", 0)
+            digit = b.get("lotto_digit", "?")
+            diff_short = diff[2:6] if len(diff) > 5 else diff
+
+            w = 14  # 박스 너비
+            lines[0].append("┌" + "─" * (w - 2) + "┐")
+            lines[1].append("│" + f" #{height}".ljust(w - 2) + "│")
+            lines[2].append("│" + f" Diff {diff_short}".ljust(w - 2) + "│")
+            lines[3].append("│" + f" TXs: {n_tx}".ljust(w - 2) + "│")
+            lines[4].append("│" + f" Hash: [{digit}]".ljust(w - 2) + "│")
+            lines[5].append("└" + "─" * (w - 2) + "┘")
+
+        text = "\n".join("  ".join(row) for row in lines)
+        self.query_one("#recent-blocks-display", Static).update(text)
