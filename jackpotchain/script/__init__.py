@@ -16,11 +16,11 @@ from .standard import (
     get_script_type,
     get_address_from_script_pubkey,
     create_commit_script,
-    create_reveal_script,
     is_commit_script,
-    is_reveal_script,
-    extract_commit_hash,
-    extract_reveal_data,
+    extract_commit_numbers,
+    create_lotto_payout_script,
+    is_payout_script,
+    extract_payout_data,
 )
 
 __all__ = [
@@ -30,7 +30,6 @@ __all__ = [
     'create_op_return_script', 'is_p2pkh_script_pubkey', 'is_op_return_script',
     'extract_p2pkh_pubkey_hash', 'extract_op_return_data',
     'get_script_type', 'get_address_from_script_pubkey',
-    'create_commit_script', 'create_reveal_script',
-    'is_commit_script', 'is_reveal_script',
-    'extract_commit_hash', 'extract_reveal_data',
+    'create_commit_script', 'is_commit_script', 'extract_commit_numbers',
+    'create_lotto_payout_script', 'is_payout_script', 'extract_payout_data',
 ]

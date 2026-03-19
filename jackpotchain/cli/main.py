@@ -179,7 +179,8 @@ def run_node(args):
                     miner_address=args.address,
                     transactions=txs,
                     difficulty_target=difficulty,
-                    height=height
+                    height=height,
+                    blockchain=blockchain
                 )
                 print(f"\n[Miner] Mining block {height}...")
 
@@ -394,7 +395,8 @@ def run_miner(args):
                 miner_address=args.address,
                 transactions=txs,
                 difficulty_target=difficulty,
-                height=height
+                height=height,
+                blockchain=blockchain
             )
 
             print(f"\nMining block {height}...")

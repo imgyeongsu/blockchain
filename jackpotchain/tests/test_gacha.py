@@ -55,17 +55,12 @@ class TestLottoCommit:
         commit_hash, nonce, chosen = generate_commit()
         assert verify_commit(commit_hash, nonce, chosen) is True
 
-    def test_verify_commit_invalid(self):
-        """잘못된 커밋 검증"""
+    def test_verify_commit_deprecated(self):
+        """[DEPRECATED] verify_commit은 항상 True (자동 지급에서 불필요)"""
         commit_hash, nonce, chosen = generate_commit()
-
-        # 잘못된 nonce
-        wrong_nonce = bytes(32)
-        assert verify_commit(commit_hash, wrong_nonce, chosen) is False
-
-        # 잘못된 숫자
-        wrong_numbers = [(d + 1) % LOTTO_DIGIT_BASE for d in chosen]
-        assert verify_commit(commit_hash, nonce, wrong_numbers) is False
+        # 자동 지급 방식에서는 commit 검증이 필요 없으므로 항상 True
+        assert verify_commit(commit_hash, nonce, chosen) is True
+        assert verify_commit(commit_hash, bytes(32), chosen) is True
 
     def test_invalid_digit_count(self):
         """잘못된 자릿수"""
@@ -218,17 +213,12 @@ class TestClaimTiming:
         valid, _ = is_claim_valid(500, 568)
         assert valid is True
 
-    def test_claim_too_early(self):
-        """N+18 이전 Claim 불가"""
-        valid, reason = is_claim_valid(500, 517)
-        assert valid is False
-        assert "early" in reason.lower()
-
-    def test_claim_expired(self):
-        """N+68 이후 Claim 불가"""
-        valid, reason = is_claim_valid(500, 569)
-        assert valid is False
-        assert "expired" in reason.lower()
+    def test_claim_deprecated_always_valid(self):
+        """[DEPRECATED] is_claim_valid는 항상 True (자동 지급 방식)"""
+        valid, _ = is_claim_valid(500, 517)
+        assert valid is True
+        valid, _ = is_claim_valid(500, 569)
+        assert valid is True
 
 
 class TestCommitStore:
@@ -269,23 +259,23 @@ class TestCommitStore:
         status = get_commit_status(record, 110)
         assert status == CommitStatus.PENDING
 
-    def test_commit_status_claimable(self):
-        """CLAIMABLE 상태"""
+    def test_commit_status_resolved(self):
+        """RESOLVED 상태 (자동 지급 완료)"""
         commit_hash, _, chosen = generate_commit()
         record = CommitRecord(
             commit_hash=commit_hash,
             player_address='test',
             commit_height=100,
             commit_tx_id=b'\x01' * 32,
-            chosen_numbers=chosen
+            chosen_numbers=chosen,
+            claim_height=118,  # 지급 완료
         )
 
-        # current_height = 135 (gap = 35, 30 <= gap <= 80)
         status = get_commit_status(record, 135)
-        assert status == CommitStatus.CLAIMABLE
+        assert status == CommitStatus.RESOLVED
 
-    def test_commit_status_expired(self):
-        """EXPIRED 상태"""
+    def test_commit_status_pending_after_gap(self):
+        """자동 지급 대기 중에도 PENDING (미처리)"""
         commit_hash, _, chosen = generate_commit()
         record = CommitRecord(
             commit_hash=commit_hash,
@@ -295,9 +285,9 @@ class TestCommitStore:
             chosen_numbers=chosen
         )
 
-        # current_height = 185 (gap = 85 > 80)
+        # N+18 이후인데 아직 지급 안된 경우 → PENDING (지급 대기)
         status = get_commit_status(record, 185)
-        assert status == CommitStatus.EXPIRED
+        assert status == CommitStatus.PENDING
 
 
 class TestJackpotPool:
@@ -380,9 +370,9 @@ class TestLegacyCompatibility:
         slot = calculate_winning_slot(nonce, block_hash)
         assert 0 <= slot <= 99
 
-    def test_check_win_still_works(self):
-        """기존 check_win 함수 동작"""
-        assert check_win(42, 42) is True
+    def test_check_win_deprecated(self):
+        """[DEPRECATED] check_win은 항상 False (자동 지급 방식)"""
+        assert check_win(42, 42) is False
         assert check_win(42, 43) is False
 
     def test_reveal_valid_alias(self):

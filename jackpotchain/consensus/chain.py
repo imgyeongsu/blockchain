@@ -13,8 +13,9 @@ from enum import Enum
 from ..core.block import Block, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
-from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_hash, is_claim_script, extract_claim_data
-from ..constants import TX_VERSION_COMMIT, TX_VERSION_CLAIM
+from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_numbers
+from ..crypto.address import JACKPOT_POOL_ADDRESS
+from ..constants import TX_VERSION_COMMIT
 
 
 class ChainState(Enum):
@@ -47,11 +48,13 @@ class BlockIndex:
 
 @dataclass
 class CommitInfo:
-    """Commit TX 인덱스 정보 (Claim 검증용)"""
+    """Commit TX 인덱스 정보 (자동 지급용)"""
     tx_id: bytes
     block_height: int
     block_hash: bytes
-    claim_height: int = 0  # Claim된 높이 (0이면 미클레임)
+    chosen_numbers: list = None  # 선택한 숫자 (평문)
+    player_address: str = ""     # 플레이어 주소
+    payout_height: int = 0       # 지급 블록 높이 (0이면 미지급)
 
 
 class Blockchain:
@@ -384,8 +387,6 @@ class Blockchain:
 
             # Commit TX 인덱싱
             self._index_commit_tx(tx, height, block_hash)
-            # Claim TX 인덱싱
-            self._index_claim_tx(tx, height)
 
         # Undo 데이터 저장 (나중에 disconnect용)
         self._undo_data[block_hash] = undo_data
@@ -411,28 +412,22 @@ class Blockchain:
 
             # Commit TX 인덱스 제거
             self._unindex_commit_tx(tx)
-            # Claim TX 인덱스 되돌리기 (claim_height → 0)
-            self._unindex_claim_tx(tx)
 
         # Undo 데이터 제거
         self._undo_data.pop(block_hash, None)
 
-    def _unindex_claim_tx(self, tx):
-        """
-        Claim TX 인덱스 되돌리기 (reorg 시)
-        해당 commit의 claim_height를 0으로 리셋하여 다시 claim 가능하게 함
-        """
-        if tx.version != TX_VERSION_CLAIM:
-            return
-
-        for output in tx.outputs:
-            if is_claim_script(output.script_pubkey):
-                claim_data = extract_claim_data(output.script_pubkey)
-                if claim_data:
-                    commit_hash, nonce, chosen_numbers = claim_data
-                    if commit_hash in self._commit_index:
-                        self._commit_index[commit_hash].claim_height = 0
-                    return
+    def get_commits_at_height(self, height: int) -> list:
+        """특정 높이의 Commit TX 목록 반환 (자동 지급용)"""
+        result = []
+        for tx_id, info in self._commit_index.items():
+            if info.block_height == height and info.payout_height == 0:
+                result.append((
+                    info.tx_id,
+                    info.player_address,
+                    info.chosen_numbers or [],
+                    0  # pool_snapshot (동적 조회)
+                ))
+        return result
 
     def _get_ancestors(self, block_hash: bytes, limit: int = 1000) -> List[bytes]:
         """블록의 조상들 반환"""
@@ -448,55 +443,43 @@ class Blockchain:
 
     def _index_commit_tx(self, tx, height: int, block_hash: bytes):
         """
-        Commit TX 인덱싱 (claim 검증용)
+        Commit TX 인덱싱 (자동 지급용)
 
-        Commit TX의 OP_RETURN에서 commit_hash 추출 후 인덱스에 저장
+        TX ID를 키로 사용하여 chosen_numbers와 player_address 저장
         """
         if tx.version != TX_VERSION_COMMIT:
             return
 
-        # OP_RETURN output에서 commit_hash 추출
         for output in tx.outputs:
             if is_commit_script(output.script_pubkey):
-                commit_hash = extract_commit_hash(output.script_pubkey)
-                if commit_hash:
-                    self._commit_index[commit_hash] = CommitInfo(
-                        tx_id=tx.get_txid(),
+                chosen_numbers = extract_commit_numbers(output.script_pubkey)
+                if chosen_numbers:
+                    # 플레이어 주소 추출 (P2PKH 출력에서)
+                    player_address = ""
+                    for out in tx.outputs:
+                        addr = get_address_from_script_pubkey(out.script_pubkey)
+                        if addr and addr != JACKPOT_POOL_ADDRESS:
+                            player_address = addr
+                            break
+
+                    tx_id = tx.get_txid()
+                    self._commit_index[tx_id] = CommitInfo(
+                        tx_id=tx_id,
                         block_height=height,
-                        block_hash=block_hash
+                        block_hash=block_hash,
+                        chosen_numbers=chosen_numbers,
+                        player_address=player_address,
                     )
                     return
 
     def _unindex_commit_tx(self, tx):
-        """
-        Commit TX 인덱스 제거 (reorg 시)
-        """
+        """Commit TX 인덱스 제거 (reorg 시)"""
         if tx.version != TX_VERSION_COMMIT:
             return
 
-        for output in tx.outputs:
-            if is_commit_script(output.script_pubkey):
-                commit_hash = extract_commit_hash(output.script_pubkey)
-                if commit_hash and commit_hash in self._commit_index:
-                    del self._commit_index[commit_hash]
-                    return
-
-    def _index_claim_tx(self, tx, height: int):
-        """
-        Claim TX 인덱싱 - 해당 commit의 claim_height 업데이트
-        """
-        if tx.version != TX_VERSION_CLAIM:
-            return
-
-        for output in tx.outputs:
-            if is_claim_script(output.script_pubkey):
-                claim_data = extract_claim_data(output.script_pubkey)
-                if claim_data:
-                    commit_hash, nonce, chosen_numbers = claim_data
-                    # 해당 commit의 claim_height 업데이트
-                    if commit_hash in self._commit_index:
-                        self._commit_index[commit_hash].claim_height = height
-                    return
+        tx_id = tx.get_txid()
+        if tx_id in self._commit_index:
+            del self._commit_index[tx_id]
 
     def pop_disconnected_txs(self) -> list:
         """Reorg 시 disconnect된 TX 목록 반환 및 초기화 (mempool 복원용)"""
