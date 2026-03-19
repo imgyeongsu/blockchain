@@ -114,6 +114,7 @@ class Node:
         self._batch_size: int = 16  # 동시 요청 블록 수
         self._sync_start_time: float = 0  # 동기화 세션 시작 시각
         self._sync_timeout: int = 120  # 동기화 세션 타임아웃 (초)
+        self._last_inv_count: int = 0  # 마지막 INV에서 받은 블록 수 (연속 동기화 판단용)
 
     @property
     def height(self) -> int:
@@ -129,7 +130,17 @@ class Node:
     @property
     def is_syncing(self) -> bool:
         """IBD(Initial Block Download) 중인지 확인"""
-        return self._sync_peer is not None or len(self._pending_blocks) > 0
+        if self._sync_peer is not None:
+            # 타임아웃 경과 시 좀비 동기화 상태 자동 해제
+            if self._sync_start_time > 0 and time.time() - self._sync_start_time > self._sync_timeout:
+                print(f"[SYNC] 동기화 타임아웃 감지, 상태 초기화 (높이: {self.height})")
+                self._sync_peer = None
+                self._pending_blocks.clear()
+                self._requesting.clear()
+                self._block_buffer.clear()
+                return False
+            return True
+        return len(self._pending_blocks) > 0
 
     def set_block_callback(self, callback: Callable):
         """블록 수신 콜백 설정"""
@@ -377,8 +388,20 @@ class Node:
         # VERACK 전송
         await self._send_message(address, MessageType.VERACK, b'')
 
-        # 인바운드면 VERSION도 전송
+        # 인바운드 피어의 리스닝 주소를 discovery에 등록
+        # (TCP 연결의 임시 포트가 아닌, VERSION에 광고된 리스닝 포트 사용)
         peer = self.peer_manager.get_peer(address)
+        if peer and peer.is_inbound and version_msg.addr_trans_port > 0:
+            listen_addr = PeerAddress(
+                ip=address.ip,
+                port=version_msg.addr_trans_port,
+                services=version_msg.services,
+                timestamp=int(time.time())
+            )
+            self.discovery.add_addresses([listen_addr])
+            self.discovery.mark_good(listen_addr)
+
+        # 인바운드면 VERSION도 전송
         if peer and peer.is_inbound:
             await self._send_version(address)
 
@@ -455,6 +478,7 @@ class Node:
             self._pending_blocks = block_hashes
             self._sync_peer = address
             self._sync_start_time = time.time()  # 세션 타임아웃 추적 (5.6)
+            self._last_inv_count = block_count
             print(f"[SYNC] 블록 {len(block_hashes)}개 대기열에 추가, 순차 다운로드 시작")
             await self._request_next_block()
 
@@ -567,6 +591,10 @@ class Node:
         # 다음 배치 요청
         if self._pending_blocks:
             await self._request_next_block()
+        elif self._last_inv_count >= 500 and self._sync_peer:
+            # 이전 INV가 최대치(500)였으면 피어에 더 많은 블록이 있을 수 있음
+            print(f"[SYNC] 배치 완료 (높이: {self.height}), 추가 블록 요청...")
+            await self._request_blocks(self._sync_peer)
         else:
             print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
             self._sync_peer = None

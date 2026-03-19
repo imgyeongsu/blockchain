@@ -236,14 +236,17 @@ class MiningWidget(ScrollableContainer):
             # 디버그: 로그 파일로 출력 (APPDATA에 저장)
             appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
             log_path = os.path.join(appdata, 'JackpotChain', 'node_subprocess.log')
-            log_file = open(log_path, "w")
+            log_file = open(log_path, "w", encoding="utf-8")
             log_file.write(f"CMD: {cmd}\n")
             log_file.flush()
 
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
             self.node_process = subprocess.Popen(
                 cmd,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
+                env=env,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0,
             )
             self.query_one("#mining-msg", Label).update(f"Node started with {app.current_wallet_file.name}")
