@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ..constants import NETWORK_MAGIC
+from ..core.transaction import encode_varint, decode_varint
+from ..crypto.hash import double_sha256
 
 
 class MessageType(Enum):
@@ -179,7 +181,6 @@ class InvMessage:
     items: List[InvItem] = field(default_factory=list)
 
     def serialize(self) -> bytes:
-        from ..core.transaction import encode_varint
         result = encode_varint(len(self.items))
         for item in self.items:
             result += item.serialize()
@@ -187,7 +188,6 @@ class InvMessage:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'InvMessage':
-        from ..core.transaction import decode_varint
         count, offset = decode_varint(data, 0)
         items = []
         for _ in range(count):
@@ -218,7 +218,6 @@ class GetBlocksMessage:
     hash_stop: bytes = bytes(32)
 
     def serialize(self) -> bytes:
-        from ..core.transaction import encode_varint
         result = struct.pack('<I', self.version)
         result += encode_varint(len(self.block_locator))
         for hash_bytes in self.block_locator:
@@ -228,7 +227,6 @@ class GetBlocksMessage:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'GetBlocksMessage':
-        from ..core.transaction import decode_varint
         offset = 0
         version = struct.unpack('<I', data[offset:offset+4])[0]
         offset += 4
@@ -291,7 +289,6 @@ class AddrMessage:
     addresses: List[NetAddress] = field(default_factory=list)
 
     def serialize(self) -> bytes:
-        from ..core.transaction import encode_varint
         result = encode_varint(len(self.addresses))
         for addr in self.addresses:
             result += addr.serialize()
@@ -299,7 +296,6 @@ class AddrMessage:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'AddrMessage':
-        from ..core.transaction import decode_varint
         count, offset = decode_varint(data, 0)
         # 최대 1000개 제한
         count = min(count, 1000)
@@ -318,7 +314,6 @@ class GetHeadersMessage:
     hash_stop: bytes = bytes(32)
 
     def serialize(self) -> bytes:
-        from ..core.transaction import encode_varint
         result = struct.pack('<I', self.version)
         result += encode_varint(len(self.block_locator))
         for hash_bytes in self.block_locator:
@@ -328,7 +323,6 @@ class GetHeadersMessage:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'GetHeadersMessage':
-        from ..core.transaction import decode_varint
         offset = 0
         version = struct.unpack('<I', data[offset:offset+4])[0]
         offset += 4
@@ -347,7 +341,6 @@ class HeadersMessage:
     headers: List[bytes] = field(default_factory=list)  # 80-byte headers
 
     def serialize(self) -> bytes:
-        from ..core.transaction import encode_varint
         result = encode_varint(len(self.headers))
         for header in self.headers:
             result += header
@@ -356,7 +349,6 @@ class HeadersMessage:
 
     @classmethod
     def deserialize(cls, data: bytes) -> 'HeadersMessage':
-        from ..core.transaction import decode_varint
         count, offset = decode_varint(data, 0)
         # 최대 2000개 제한
         count = min(count, 2000)
@@ -372,7 +364,7 @@ class HeadersMessage:
 
 def create_message(msg_type: MessageType, payload: bytes) -> bytes:
     """완전한 메시지 생성"""
-    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    checksum = double_sha256(payload)[:4]
     header = MessageHeader(
         magic=NETWORK_MAGIC,
         command=msg_type.value,
@@ -400,7 +392,7 @@ def parse_message(data: bytes) -> Tuple[Optional[MessageHeader], bytes]:
     payload = data[24:24 + header.length]
 
     # 체크섬 검증
-    checksum = hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+    checksum = double_sha256(payload)[:4]
     if checksum != header.checksum:
         return None, b''
 
