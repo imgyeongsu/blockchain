@@ -26,6 +26,10 @@ from ..core.transaction import Transaction
 from ..mempool.pool import Mempool
 from ..constants import DEFAULT_PORT, DEFAULT_RENDEZVOUS_PORT
 
+# 블록 버퍼/대기열 최대 크기 (메모리 누수 방지)
+MAX_BLOCK_BUFFER_SIZE = 1000
+MAX_PENDING_BLOCKS = 5000
+
 
 @dataclass
 class NodeConfig:
@@ -436,6 +440,11 @@ class Node:
                     block_hashes.append(item.hash)
 
         if block_hashes:
+            # 대기열 크기 제한
+            if len(block_hashes) > MAX_PENDING_BLOCKS:
+                print(f"[SYNC] 대기열 크기 제한: {len(block_hashes)} -> {MAX_PENDING_BLOCKS}")
+                block_hashes = block_hashes[:MAX_PENDING_BLOCKS]
+
             self._pending_blocks = block_hashes
             self._sync_peer = address
             print(f"[SYNC] 블록 {len(block_hashes)}개 대기열에 추가, 순차 다운로드 시작")
@@ -497,6 +506,13 @@ class Node:
         if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
             # 버퍼에 저장 (나중에 처리)
             if block_hash in self._pending_blocks:
+                # 버퍼 크기 제한 체크
+                if len(self._block_buffer) >= MAX_BLOCK_BUFFER_SIZE:
+                    # 가장 오래된 항목 제거
+                    oldest_key = next(iter(self._block_buffer))
+                    del self._block_buffer[oldest_key]
+                    print(f"[BUFFER] 크기 제한 초과, 오래된 블록 제거: {oldest_key.hex()[:16]}...")
+
                 self._block_buffer[block_hash] = block
             else:
                 # 동기화 목록에 없는 블록 - GETBLOCKS 요청
