@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..consensus.chain import Blockchain, ChainState
+from ..consensus.difficulty import get_next_difficulty
 from ..core.block import Block
 from ..network.peer import PeerInfo, PeerManager
 from ..validation.block import validate_block
@@ -177,11 +178,21 @@ class SyncManager:
         self._downloading.discard(block_hash)
         self._blocks_to_fetch.discard(block_hash)
 
+        # 이전 블록 헤더 및 예상 난이도
+        prev_block = self.blockchain.get_tip()
+        prev_header = prev_block.header if prev_block else None
+        expected_difficulty = get_next_difficulty(
+            self.blockchain.get_height(),
+            self.blockchain.get_block_by_height
+        )
+
         # 검증
         result = validate_block(
             block,
             self.blockchain.utxo_set,
             self.blockchain.get_height() + 1,
+            prev_header=prev_header,
+            expected_difficulty=expected_difficulty,
             blockchain=self.blockchain
         )
 
