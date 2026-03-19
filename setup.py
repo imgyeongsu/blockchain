@@ -12,15 +12,16 @@ setup(
     packages=find_packages(),
     python_requires=">=3.8",
     install_requires=[
-        "aiohttp>=3.8.0",
-        "ecdsa>=0.18.0",
+        "aiohttp>=3.9.0",
+        "ecdsa>=0.19.0",
         "textual>=0.50.0",
         "rich>=13.0.0",
     ],
     extras_require={
         "dev": [
-            "pytest>=7.0.0",
-            "pytest-asyncio>=0.20.0",
+            "pytest>=8.0.0",
+            "pytest-asyncio>=0.23.0",
+            "pyinstaller>=6.0.0",
         ],
     },
     entry_points={
