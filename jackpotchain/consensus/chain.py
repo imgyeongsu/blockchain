@@ -89,6 +89,9 @@ class Blockchain:
         # Commit TX 인덱스 (Claim 검증용): commit_hash -> CommitInfo
         self._commit_index: Dict[bytes, CommitInfo] = {}
 
+        # Reorg 시 mempool 복원 대상 TX (add_block 호출자가 가져감)
+        self._disconnected_txs: list = []
+
         # 상태
         self.state = ChainState.SYNCING
 
@@ -126,11 +129,8 @@ class Blockchain:
                     else:
                         self._add_block_internal(block, height)
 
-                    # UTXO 업데이트 + Commit 인덱싱
-                    block_hash = block.get_hash()
-                    for tx in block.transactions:
-                        self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
-                        self._index_commit_tx(tx, height, block_hash)
+                    # _connect_block으로 UTXO + undo 데이터 + 인덱싱 일괄 처리
+                    self._connect_block(block, height)
 
             print(f"[Chain] Loaded {tip_height + 1} blocks. Height: {self.get_height()}")
 
@@ -291,6 +291,9 @@ class Blockchain:
         Args:
             old_tip_hash: 이전 메인 체인 팁
             new_tip_hash: 새 메인 체인 팁
+
+        Returns:
+            disconnected_txs: disconnect된 블록의 TX 목록 (mempool 복원용, coinbase 제외)
         """
         self.state = ChainState.REORGING
 
@@ -336,15 +339,30 @@ class Blockchain:
             self._height_to_hash[height] = block_hash
 
         # UTXO Set 업데이트 (disconnect/connect)
-        # 1. 기존 블록들 되돌리기 (역순으로)
+        # 1. 기존 블록들 되돌리기 (역순으로) — TX 수집
+        disconnected_txs = []
         for block_hash in blocks_to_disconnect:
+            block = self._blocks.get(block_hash)
+            if block:
+                # coinbase(인덱스 0) 제외한 TX를 mempool 복원 후보로 수집
+                disconnected_txs.extend(block.transactions[1:])
             self._disconnect_block(block_hash)
 
         # 2. 새 블록들 연결하기
+        # 새 체인에 이미 포함된 TX는 mempool 복원 대상에서 제거
+        new_chain_txids = set()
         for block_hash in blocks_to_connect:
             block = self._blocks[block_hash]
             height = self._block_index[block_hash].height
             self._connect_block(block, height)
+            for tx in block.transactions[1:]:
+                new_chain_txids.add(tx.get_txid())
+
+        # 새 체인에 포함되지 않은 TX만 반환 (mempool 복원 대상)
+        self._disconnected_txs = [
+            tx for tx in disconnected_txs
+            if tx.get_txid() not in new_chain_txids
+        ]
 
         self.state = ChainState.SYNCED
 
@@ -374,7 +392,7 @@ class Blockchain:
 
     def _disconnect_block(self, block_hash: bytes):
         """
-        블록 연결 해제 (UTXO 되돌리기 + commit 인덱스 제거)
+        블록 연결 해제 (UTXO 되돌리기 + commit/claim 인덱스 제거)
 
         Args:
             block_hash: 연결 해제할 블록 해시
@@ -393,9 +411,28 @@ class Blockchain:
 
             # Commit TX 인덱스 제거
             self._unindex_commit_tx(tx)
+            # Claim TX 인덱스 되돌리기 (claim_height → 0)
+            self._unindex_claim_tx(tx)
 
         # Undo 데이터 제거
         self._undo_data.pop(block_hash, None)
+
+    def _unindex_claim_tx(self, tx):
+        """
+        Claim TX 인덱스 되돌리기 (reorg 시)
+        해당 commit의 claim_height를 0으로 리셋하여 다시 claim 가능하게 함
+        """
+        if tx.version != TX_VERSION_CLAIM:
+            return
+
+        for output in tx.outputs:
+            if is_claim_script(output.script_pubkey):
+                claim_data = extract_claim_data(output.script_pubkey)
+                if claim_data:
+                    commit_hash, nonce, chosen_numbers = claim_data
+                    if commit_hash in self._commit_index:
+                        self._commit_index[commit_hash].claim_height = 0
+                    return
 
     def _get_ancestors(self, block_hash: bytes, limit: int = 1000) -> List[bytes]:
         """블록의 조상들 반환"""
@@ -460,6 +497,12 @@ class Blockchain:
                     if commit_hash in self._commit_index:
                         self._commit_index[commit_hash].claim_height = height
                     return
+
+    def pop_disconnected_txs(self) -> list:
+        """Reorg 시 disconnect된 TX 목록 반환 및 초기화 (mempool 복원용)"""
+        txs = self._disconnected_txs
+        self._disconnected_txs = []
+        return txs
 
     def get_commit_info(self, commit_hash: bytes) -> Optional[CommitInfo]:
         """

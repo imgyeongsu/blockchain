@@ -200,7 +200,7 @@ class TestPeerDiscovery:
     def test_add_addresses(self):
         """주소 추가"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            discovery = PeerDiscovery(tmpdir)
+            discovery = PeerDiscovery(tmpdir, allow_private_ip=True)
             discovery.initialize()
 
             # ADDR에서 받은 주소 추가
@@ -218,7 +218,7 @@ class TestPeerDiscovery:
     def test_mark_good_bad(self):
         """성공/시도 기록"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            discovery = PeerDiscovery(tmpdir)
+            discovery = PeerDiscovery(tmpdir, allow_private_ip=True)
             discovery.initialize()
 
             addr = PeerAddress(ip="10.0.0.1", port=8333)
@@ -241,7 +241,7 @@ class TestPeerDiscovery:
     def test_get_addr_to_send(self):
         """ADDR 응답용 주소 목록"""
         with tempfile.TemporaryDirectory() as tmpdir:
-            discovery = PeerDiscovery(tmpdir)
+            discovery = PeerDiscovery(tmpdir, allow_private_ip=True)
 
             # 최근 주소 추가
             now = int(time.time())
