@@ -487,8 +487,12 @@ def validate_lotto_claim(
     prize = determine_prize(matches)
 
     # 6. Payout 검증
+    # 잭팟 풀 잔액 조회 (1등 상금 계산용)
+    pool_utxos = blockchain.utxo_set.get_pool_utxos()
+    pool_balance = sum(utxo.output.jack_value for utxo in pool_utxos)
+
     # calculate_payout은 (jack_payout, pot_payout) 튜플 반환
-    expected_jack, expected_pot = calculate_payout(prize, pool_snapshot=0)
+    expected_jack, expected_pot = calculate_payout(prize, pool_snapshot=pool_balance)
 
     # TX에서 실제 payout 추출
     actual_jack = 0
