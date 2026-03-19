@@ -24,11 +24,8 @@ from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
 from ..mempool.pool import Mempool
+from ..sync.manager import SyncManager, SyncState
 from ..constants import DEFAULT_PORT, DEFAULT_RENDEZVOUS_PORT
-
-# 블록 버퍼/대기열 최대 크기 (메모리 누수 방지)
-MAX_BLOCK_BUFFER_SIZE = 1000
-MAX_PENDING_BLOCKS = 5000
 
 
 @dataclass
@@ -105,12 +102,15 @@ class Node:
         # GETADDR 요청 시간 추적 (스팸 방지)
         self._last_getaddr: Dict[PeerAddress, float] = {}
 
-        # 순차 블록 동기화용
-        self._pending_blocks: List[bytes] = []  # 대기 중인 블록 해시 목록
-        self._sync_peer: Optional[PeerAddress] = None  # 동기화 중인 피어
-        self._requesting: set = set()  # 현재 요청 중인 블록 해시
-        self._block_buffer: Dict[bytes, Block] = {}  # 순서 대기 중인 블록
-        self._batch_size: int = 16  # 동시 요청 블록 수
+        # 네트워크 전역 동기화 피어 대상자 (SyncManager 연동)
+        self._sync_peer: Optional[PeerAddress] = None
+
+        # Headers-First SyncManager 엔진 통합 (단일 소스)
+        self.sync_manager = SyncManager(self.blockchain, self.peer_manager)
+        self.sync_manager.set_callbacks(
+            request_headers=self._on_sync_request_headers,
+            request_blocks=self._on_sync_request_blocks
+        )
 
     @property
     def height(self) -> int:
@@ -126,7 +126,7 @@ class Node:
     @property
     def is_syncing(self) -> bool:
         """IBD(Initial Block Download) 중인지 확인"""
-        return self._sync_peer is not None or len(self._pending_blocks) > 0
+        return self.sync_manager.state in (SyncState.HEADERS, SyncState.BLOCKS)
 
     def set_block_callback(self, callback: Callable):
         """블록 수신 콜백 설정"""
@@ -400,11 +400,17 @@ class Node:
             await self._check_sync(address)
 
     async def _check_sync(self, address: PeerAddress):
-        """동기화 필요 여부 확인 및 시작"""
+        """동기화 필요 여부 확인 및 시작 (안전 가드 적용)"""
         peer = self.peer_manager.get_peer(address)
         if peer and peer.start_height > self.height:
-            print(f"[SYNC] IBD 시작: 로컬={self.height}, 피어={peer.start_height}, 주소={address.ip}:{address.port}")
-            await self._request_blocks(address)
+            if self.sync_manager.state in (SyncState.IDLE, SyncState.SYNCED):
+                self._sync_peer = address
+                print(f"[SYNC] Headers-First IBD 시작: 로컬={self.height}, 피어={peer.start_height}, 주소={address.ip}:{address.port}")
+                self.sync_manager.update_peer_height(peer, peer.start_height)
+                await self.sync_manager.start_sync()
+            else:
+                # 이미 IBD 진행 중일 때는 엔진 초기화를 피하고 높이 갱신만 수행
+                self.sync_manager.update_peer_height(peer, peer.start_height)
         else:
             print(f"[SYNC] 동기화 불필요: 로컬={self.height}, 피어={peer.start_height if peer else 'N/A'}")
 
@@ -432,7 +438,7 @@ class Node:
             getdata = GetDataMessage(items=tx_to_fetch)
             await self._send_message(address, MessageType.GETDATA, getdata.serialize())
 
-        # 블록은 순차 요청 (pending 큐에 저장)
+        # 블록 전파(INV) 처리
         block_hashes = []
         for item in inv_msg.items:
             if item.inv_type == InvType.BLOCK:
@@ -440,41 +446,16 @@ class Node:
                     block_hashes.append(item.hash)
 
         if block_hashes:
-            # 대기열 크기 제한
-            if len(block_hashes) > MAX_PENDING_BLOCKS:
-                print(f"[SYNC] 대기열 크기 제한: {len(block_hashes)} -> {MAX_PENDING_BLOCKS}")
-                block_hashes = block_hashes[:MAX_PENDING_BLOCKS]
-
-            self._pending_blocks = block_hashes
-            self._sync_peer = address
-            print(f"[SYNC] 블록 {len(block_hashes)}개 대기열에 추가, 순차 다운로드 시작")
-            await self._request_next_block()
-
-    async def _request_next_block(self):
-        """대기 중인 다음 블록들 요청 (배치)"""
-        if not self._pending_blocks or not self._sync_peer:
-            return
-
-        # 요청 안 한 것 중 최대 batch_size개 선택
-        to_request = []
-        for block_hash in self._pending_blocks:
-            if block_hash not in self._requesting and block_hash not in self._block_buffer:
-                to_request.append(block_hash)
-                if len(to_request) >= self._batch_size:
-                    break
-
-        if not to_request:
-            return
-
-        # 요청 중 표시
-        for h in to_request:
-            self._requesting.add(h)
-
-        # 여러 블록 한번에 요청
-        items = [InvItem(InvType.BLOCK, h) for h in to_request]
-        getdata = GetDataMessage(items=items)
-        print(f"[SYNC] GETDATA 요청: {len(items)}개 블록 (대기: {len(self._pending_blocks)}개)")
-        await self._send_message(self._sync_peer, MessageType.GETDATA, getdata.serialize())
+            # IBD 동기화 진행 중이라면 새로운 블록 생성 전파(INV)는 무시 (엔진이 나중에 일괄 다운로드함)
+            if self.sync_manager.state in (SyncState.HEADERS, SyncState.BLOCKS):
+                print(f"[SYNC] IBD 진행 중이므로 실시간 브로드캐스트 INV 수신은 일시 무시 (해시 {len(block_hashes)}개)")
+                return
+            
+            # 엔진이 쉬고 있다면(평시 동작) 곧바로 본문 GETDATA 1:1 요청
+            items = [InvItem(InvType.BLOCK, h) for h in block_hashes]
+            getdata = GetDataMessage(items=items)
+            print(f"[SYNC] 실시간 브로드캐스트 블록 {len(items)}개 GETDATA 요청 전송")
+            await self._send_message(address, MessageType.GETDATA, getdata.serialize())
 
     async def _handle_getdata(self, address: PeerAddress, payload: bytes):
         """GETDATA 처리"""
@@ -498,62 +479,28 @@ class Node:
         peer = self.peer_manager.get_peer(address)
         block_hash = block.get_hash()
 
-        # 요청 목록에서 제거
-        self._requesting.discard(block_hash)
-
-        # 이전 블록이 없으면 버퍼에 저장
-        prev_hash = block.header.prev_block_hash
-        if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
-            # 버퍼에 저장 (나중에 처리)
-            if block_hash in self._pending_blocks:
-                # 버퍼 크기 제한 체크
-                if len(self._block_buffer) >= MAX_BLOCK_BUFFER_SIZE:
-                    # 가장 오래된 항목 제거
-                    oldest_key = next(iter(self._block_buffer))
-                    del self._block_buffer[oldest_key]
-                    print(f"[BUFFER] 크기 제한 초과, 오래된 블록 제거: {oldest_key.hex()[:16]}...")
-
-                self._block_buffer[block_hash] = block
-            else:
-                # 동기화 목록에 없는 블록 - GETBLOCKS 요청
-                print(f"[SYNC] 이전 블록 없음, GETBLOCKS 요청 (prev={prev_hash.hex()[:16]}...)")
-                await self._request_blocks(address)
+        # 1. SyncManager 동기화 중(IBD)인 블록이라면 엔진 파이프라인으로 넘기고 종료
+        if block_hash in self.sync_manager._downloading:
+            await self.sync_manager.on_block_received(block, peer)
             return
 
-        # 블록 처리
+        # 2. 동기화 목적이 아닌 실시간 브로드캐스트된 블록 처리
+        prev_hash = block.header.prev_block_hash
+        if prev_hash != bytes(32) and not self.blockchain.has_block(prev_hash):
+            # 이전 블록이 빈 경우 우리가 뒤쳐진 것이므로 매니저 가동
+            print(f"[SYNC] 이전 블록 없음 (실시간 수신), 동기화 재개 (prev={prev_hash.hex()[:16]}...)")
+            if self.sync_manager.state in (SyncState.IDLE, SyncState.SYNCED):
+                self._sync_peer = address
+                self.sync_manager.update_peer_height(peer, self.blockchain.get_height() + 1)
+                await self.sync_manager.start_sync()
+            return
+
+        # 3. 누락된 부모가 없어 곧바로 붙일 수 있는 정상 브로드캐스트 블록
         if self._on_block:
             self._on_block(block, peer)
 
-        # 다른 피어들에게 재전파 (보낸 피어 제외)
+        # 4. 다른 피어들에게 실시간 재전파 (보낸 피어 제외)
         await self._relay_block(block, exclude=address)
-
-        # 처리된 블록 제거
-        if block_hash in self._pending_blocks:
-            self._pending_blocks.remove(block_hash)
-
-        # 버퍼에서 연결 가능한 블록들 처리
-        processed = True
-        while processed:
-            processed = False
-            for buf_hash, buf_block in list(self._block_buffer.items()):
-                if self.blockchain.has_block(buf_block.header.prev_block_hash):
-                    if self._on_block:
-                        self._on_block(buf_block, peer)
-                    # 재전파
-                    await self._relay_block(buf_block, exclude=address)
-                    del self._block_buffer[buf_hash]
-                    if buf_hash in self._pending_blocks:
-                        self._pending_blocks.remove(buf_hash)
-                    processed = True
-                    break
-
-        # 다음 배치 요청
-        if self._pending_blocks:
-            await self._request_next_block()
-        else:
-            print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
-            self._sync_peer = None
-            self._block_buffer.clear()
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
         """TX 수신"""
@@ -644,12 +591,17 @@ class Node:
         if not msg.headers:
             return
 
+        print(f"[SYNC] HEADERS 수신: {len(msg.headers)}개 from {address.ip}:{address.port}")
+
         # 피어의 synced_headers 업데이트
         peer = self.peer_manager.get_peer(address)
         if peer:
             peer.synced_headers += len(msg.headers)
 
-        # 콜백이 있으면 호출 (SyncManager에서 처리)
+        # SyncManager 엔진으로 수신된 헤더들을 전달하여 큐잉되게 만듭니다.
+        await self.sync_manager.on_headers_received(address, msg.headers)
+
+        # 기존 호환성 유지용 콜백
         if self._headers_callback:
             await self._headers_callback(address, msg.headers)
 
@@ -710,13 +662,29 @@ class Node:
         await self._send_message(address, MessageType.GETADDR, b'')
 
     async def _request_blocks(self, address: PeerAddress):
-        """블록 동기화 요청 (GETBLOCKS)"""
-        # Block locator 생성: 최근 블록들의 해시
+        """블록 동기화 요청 (GETBLOCKS) - 기존 레거시 함수 유지용"""
         locator = self.blockchain.get_block_locator()
-        # [SYNC-LOG] GETBLOCKS 요청
         print(f"[SYNC] GETBLOCKS 요청: locator 크기={len(locator)}, 현재 높이={self.blockchain.get_height()}")
         msg = GetBlocksMessage(block_locator=locator)
         await self._send_message(address, MessageType.GETBLOCKS, msg.serialize())
+
+    # --- SyncManager 연동을 위한 전용 통신 콜백 함수들 ---
+    async def _on_sync_request_headers(self, locator: List[bytes]):
+        """SyncManager에서 헤더를 요청할 때 트리거되는 콜백"""
+        if self._sync_peer:
+            # SyncManager가 만들어준 locator를 담아 상대 노드에게 GETHEADERS 메시지를 날립니다.
+            msg = GetHeadersMessage(block_locator=locator)
+            print(f"[SYNC] Headers-First 진행 중: GETHEADERS 전송 (locator 크기={len(locator)})")
+            await self._send_message(self._sync_peer, MessageType.GETHEADERS, msg.serialize())
+
+    async def _on_sync_request_blocks(self, block_hashes: List[bytes]):
+        """SyncManager에서 헤더 검증 후 본문을 요청할 때 트리거되는 콜백"""
+        if self._sync_peer:
+            # 수집된 정상 해시값들로 GETDATA 메시지를 조립하여 전송합니다.
+            items = [InvItem(InvType.BLOCK, h) for h in block_hashes]
+            msg = GetDataMessage(items=items)
+            print(f"[SYNC] Headers-First 진행 중: GETDATA 전송 (본문 {len(items)}개 동시 요청)")
+            await self._send_message(self._sync_peer, MessageType.GETDATA, msg.serialize())
 
     async def _send_version(self, address: PeerAddress):
         """VERSION 전송"""

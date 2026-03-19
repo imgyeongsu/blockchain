@@ -12,7 +12,7 @@ from enum import Enum
 
 from ..consensus.chain import Blockchain, ChainState
 from ..consensus.difficulty import get_next_difficulty
-from ..core.block import Block
+from ..core.block import Block, BlockHeader
 from ..network.peer import PeerInfo, PeerManager
 from ..validation.block import validate_block
 from ..constants import MAX_HEADERS_SIZE
@@ -132,14 +132,37 @@ class SyncManager:
 
         return locator
 
-    async def on_headers_received(self, headers: List):
+    async def on_headers_received(self, address, headers: List):
         """헤더 수신"""
         if self.state != SyncState.HEADERS:
             return
 
-        for header in headers:
-            # TODO: 헤더 검증 및 저장
-            pass
+        for header_bytes in headers:
+            try:
+                # 1. 수신한 바이트 배열을 BlockHeader 객체로 변환 (역직렬화)
+                header, _ = BlockHeader.deserialize(header_bytes)
+                header_hash = header.get_hash()
+
+                # 2. 로컬 블록체인에 이미 추가되어 있는 블록인지 검사 (중복 다운로드 방지)
+                if self.blockchain.has_block(header_hash):
+                    continue
+
+                # 3. 작업증명(PoW) 일차적 검증
+                # 악의적인 공격자가 쓰레기 데이터를 보내더라도 PoW를 통과하지 못하면 
+                # 블록 본문을 다운로드하기 전에 즉시 무시하여 대역폭과 디스크 I/O를 절약합니다.
+                if not header.verify_pow():
+                    # (실제 환경에서는 여기서 해당 Peer의 신뢰도 점수를 깎습니다)
+                    continue
+
+                # 4. 검증 완료된 해시를 다운로드 목록(Set)에 담아 중복 요청을 방지
+                self._blocks_to_fetch.add(header_hash)
+                
+                # 다운로드 순서를 보장하기 위해 List 구조에도 추가로 보관
+                self._headers_to_fetch.append(header_hash)
+                
+            except Exception as e:
+                # 직렬화 형식이 잘못되었거나 파싱 실패 시 무시
+                pass
 
         if len(headers) < MAX_HEADERS_SIZE:
             # 헤더 동기화 완료
