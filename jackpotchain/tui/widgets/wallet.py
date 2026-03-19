@@ -407,6 +407,9 @@ class WalletWidget(ScrollableContainer):
                 wallet_path = self.app.wallet_dir / f"{wallet_name}.json"
                 self.app.current_wallet_file = wallet_path
 
+                # 노드에도 활성 지갑 변경
+                self.run_worker(self._set_node_wallet(wallet_name))
+
             self.query_one("#wallet-status", Label).update(
                 f"Selected: {addr[:20]}... ({wallet_name})"
             )
