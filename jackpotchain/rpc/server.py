@@ -18,9 +18,10 @@ from ..consensus.miner import create_block_template, mine_block
 from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
-from ..constants import DEFAULT_RPC_PORT, LOTTO_MIN_CLAIM_GAP
+from ..constants import DEFAULT_RPC_PORT, LOTTO_MIN_CLAIM_GAP, TX_VERSION_GACHA_COMMIT
 from ..gacha.game import GachaGame
 from ..gacha.service import GachaService, create_gacha_service
+from ..script.standard import is_commit_script
 
 
 @dataclass
@@ -627,11 +628,15 @@ class RPCServer:
                     # 블록 추가
                     success, msg = self.blockchain.add_block(result.block)
                     if success:
-                        print(f"[Miner] Block {self.blockchain.get_height()} mined!")
+                        new_height = self.blockchain.get_height()
+                        print(f"[Miner] Block {new_height} mined!")
 
                         # mempool에서 TX 제거
                         for tx in result.block.transactions[1:]:
                             self.mempool.remove_tx(tx.get_txid())
+
+                        # pending commit block_height 업데이트
+                        self._update_pending_commits_for_block(result.block, new_height)
 
                         # 네트워크 전파
                         if self.node:
@@ -650,6 +655,20 @@ class RPCServer:
                 await asyncio.sleep(1)
 
         print("[Miner] Mining stopped")
+
+    def _update_pending_commits_for_block(self, block, height: int):
+        """블록 내 commit TX의 pending commit block_height 업데이트"""
+        for tx in block.transactions:
+            if tx.version == TX_VERSION_GACHA_COMMIT:
+                for output in tx.outputs:
+                    if is_commit_script(output.script_pubkey):
+                        tx_id = tx.get_txid()
+                        self.gacha_service.update_commit_status(
+                            commit_hash=b'\x00' * 32,
+                            tx_id=tx_id,
+                            block_height=height
+                        )
+                        break
 
     # =========================================================================
     # Lotto Methods (16-2 Final)
