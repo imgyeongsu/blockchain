@@ -26,6 +26,14 @@
 
 ## 네트워크
 
+### Mempool 동기화 (연결 시)
+- **현재**: 노드 재시작 시 로컬 mempool 초기화, 피어 mempool 수신 안 함
+- **증상**: 내가 보낸 TX가 피어 mempool에는 있지만 내 UI에서 안 보임
+- **동작상 문제 없음**: 피어가 갖고 있으면 결국 블록에 포함됨
+- **Bitcoin도 기본 동기화 안 함** — 필요 시 `sendmempool` 메시지 사용
+- **우선순위 낮음**: UX 혼란 정도, 실제 TX 처리에 영향 없음
+- **해결 (선택)**: VERACK 후 INV로 mempool txid 교환
+
 ### PONG RTT 계산
 - 위치: `network/node.py:340`
 - PING/PONG 왕복 시간으로 피어 품질 측정

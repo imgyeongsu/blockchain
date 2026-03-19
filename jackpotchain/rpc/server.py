@@ -18,9 +18,10 @@ from ..consensus.miner import create_block_template, mine_block
 from ..mempool.pool import Mempool
 from ..wallet.wallet import Wallet
 from ..network.node import Node
-from ..constants import DEFAULT_RPC_PORT, LOTTO_MIN_CLAIM_GAP
+from ..constants import DEFAULT_RPC_PORT, LOTTO_MIN_CLAIM_GAP, TX_VERSION_GACHA_COMMIT
 from ..gacha.game import GachaGame
 from ..gacha.service import GachaService, create_gacha_service
+from ..script.standard import is_commit_script
 
 
 @dataclass
@@ -116,6 +117,7 @@ class RPCServer:
         self._methods['getblockhash'] = self._getblockhash
         self._methods['getblockcount'] = self._getblockcount
         self._methods['getbestblockhash'] = self._getbestblockhash
+        self._methods['getrecentblocks'] = self._getrecentblocks
 
         # Mempool
         self._methods['getmempoolinfo'] = self._getmempoolinfo
@@ -296,6 +298,25 @@ class RPCServer:
     def _getbestblockhash(self) -> str:
         """최신 블록 해시"""
         return self.blockchain.get_tip_hash().hex()
+
+    def _getrecentblocks(self, count: int = 10) -> list:
+        """최근 N개 블록 요약"""
+        height = self.blockchain.get_height()
+        count = min(count, 20)  # 최대 20개
+        blocks = []
+        for h in range(max(0, height - count + 1), height + 1):
+            block = self.blockchain.get_block_by_height(h)
+            if block is None:
+                continue
+            block_hash = block.get_hash()
+            last_hex = f"{block_hash[-1]:X}"  # 해시 마지막 1바이트의 하위 니블
+            blocks.append({
+                'height': h,
+                'difficulty': hex(block.header.difficulty_target),
+                'nTx': len(block.transactions),
+                'lotto_digit': last_hex[-1],  # 마지막 hex 1자리
+            })
+        return blocks
 
     # =========================================================================
     # Mempool Methods
@@ -627,11 +648,15 @@ class RPCServer:
                     # 블록 추가
                     success, msg = self.blockchain.add_block(result.block)
                     if success:
-                        print(f"[Miner] Block {self.blockchain.get_height()} mined!")
+                        new_height = self.blockchain.get_height()
+                        print(f"[Miner] Block {new_height} mined!")
 
                         # mempool에서 TX 제거
                         for tx in result.block.transactions[1:]:
                             self.mempool.remove_tx(tx.get_txid())
+
+                        # pending commit block_height 업데이트
+                        self._update_pending_commits_for_block(result.block, new_height)
 
                         # 네트워크 전파
                         if self.node:
@@ -650,6 +675,20 @@ class RPCServer:
                 await asyncio.sleep(1)
 
         print("[Miner] Mining stopped")
+
+    def _update_pending_commits_for_block(self, block, height: int):
+        """블록 내 commit TX의 pending commit block_height 업데이트"""
+        for tx in block.transactions:
+            if tx.version == TX_VERSION_GACHA_COMMIT:
+                for output in tx.outputs:
+                    if is_commit_script(output.script_pubkey):
+                        tx_id = tx.get_txid()
+                        self.gacha_service.update_commit_status(
+                            commit_hash=b'\x00' * 32,
+                            tx_id=tx_id,
+                            block_height=height
+                        )
+                        break
 
     # =========================================================================
     # Lotto Methods (16-2 Final)
@@ -721,12 +760,14 @@ class RPCServer:
                 if not (0 <= d <= 15):
                     raise Exception("Each number must be 0-15 (hex 0x0-0xf)")
 
-        # Commit TX 생성
+        # Commit TX 생성 (mempool에서 사용 중인 UTXO 제외, 미확인 잔돈 포함)
         tx, pending, error = self.gacha_service.create_commit(
             wallet=self.wallet,
             utxo_set=self.blockchain.utxo_set,
             current_height=self.blockchain.get_height(),
-            chosen_numbers=chosen_numbers
+            chosen_numbers=chosen_numbers,
+            is_spent_in_mempool=self.mempool.is_utxo_spent if self.mempool else None,
+            mempool=self.mempool,
         )
 
         if error:
@@ -775,9 +816,10 @@ class RPCServer:
         from ..gacha.commit_reveal import get_comparison_heights, calculate_result_digits, count_matches, determine_prize, calculate_payout
 
         comparison_heights = get_comparison_heights(commit_info.block_height)
-        payout_block = commit_info.block_height + LOTTO_MIN_CLAIM_GAP
+        from ..constants import LOTTO_PAYOUT_GAP
+        payout_block = commit_info.block_height + LOTTO_PAYOUT_GAP
 
-        if current_height < comparison_heights[-1]:
+        if current_height <= comparison_heights[-1]:
             return {
                 'success': False,
                 'status': 'pending',
@@ -825,20 +867,20 @@ class RPCServer:
         pending_commits = self.gacha_service.get_pending_commits(address)
         current_height = self.blockchain.get_height()
         from ..gacha.commit_reveal import get_comparison_heights
-        from ..constants import LOTTO_MIN_CLAIM_GAP
+        from ..constants import LOTTO_PAYOUT_GAP
 
         result = []
         for c in pending_commits:
             commit_height = c.block_height if c.block_height > 0 else current_height
             comparison_heights = get_comparison_heights(commit_height)
-            payout_block = commit_height + LOTTO_MIN_CLAIM_GAP
+            payout_block = commit_height + LOTTO_PAYOUT_GAP
 
             if c.block_height == 0:
                 status = "pending_mine"
-            elif current_height < payout_block:
+            elif current_height <= comparison_heights[-1]:
                 status = "pending"
             else:
-                status = "auto_paid"
+                status = "ready"
 
             result.append({
                 'tx_id': c.tx_id.hex() if c.tx_id else '',

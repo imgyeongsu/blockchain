@@ -85,9 +85,11 @@ LOTTO_DIGIT_BASE = 16            # hex 0x0 ~ 0xf
 LOTTO_BLOCK_INTERVAL = 3         # 비교 블록 간격
 LOTTO_COMPARISON_OFFSETS = [3, 6, 9, 12, 15, 18]  # N+3, N+6, ..., N+18
 
-# Claim 윈도우
-LOTTO_MIN_CLAIM_GAP = 18         # N+18 이후 Claim 가능
-LOTTO_MAX_CLAIM_GAP = 68         # N+68까지 Claim 가능 (50블록 여유)
+# 자동 지급 타이밍
+LOTTO_MIN_CLAIM_GAP = 18         # N+18: 마지막 비교 블록
+LOTTO_PAYOUT_MATURITY = 10       # 비교 블록 확정 대기 (포크 대비)
+LOTTO_PAYOUT_GAP = LOTTO_MIN_CLAIM_GAP + LOTTO_PAYOUT_MATURITY  # N+28: 실제 지급 블록
+LOTTO_MAX_CLAIM_GAP = 68         # 레거시 호환
 GACHA_MIN_REVEAL_GAP = LOTTO_MIN_CLAIM_GAP  # 하위 호환
 GACHA_MAX_REVEAL_GAP = LOTTO_MAX_CLAIM_GAP  # 하위 호환
 

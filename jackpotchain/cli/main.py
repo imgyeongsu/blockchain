@@ -211,9 +211,14 @@ def run_node(args):
                     # 체인에 추가 (UTXO 자동 적용됨)
                     success, msg = blockchain.add_block(result.block)
                     if success:
+                        new_height = blockchain.get_height()
+
                         # Mempool에서 포함된 TX 제거
                         for tx in result.block.transactions[1:]:  # coinbase 제외
                             mempool.remove_tx(tx.get_txid())
+
+                        # pending commit block_height 업데이트
+                        rpc._update_pending_commits_for_block(result.block, new_height)
 
                         # Reorg 발생 시 disconnect된 TX를 mempool에 복원
                         disconnected_txs = blockchain.pop_disconnected_txs()
@@ -227,7 +232,7 @@ def run_node(args):
 
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
-                        print(f"[Miner] Block added and broadcasted. New height: {blockchain.get_height()}")
+                        print(f"[Miner] Block added and broadcasted. New height: {new_height}")
                     else:
                         print(f"[Miner] Failed to add block: {msg}")
 
@@ -258,10 +263,14 @@ def run_node(args):
         """피어로부터 블록 수신시 처리"""
         success, msg = blockchain.add_block(block)
         if success:
-            print(f"[CHAIN] 피어 블록 추가 성공: height={blockchain.get_height()}")
+            new_height = blockchain.get_height()
+            print(f"[CHAIN] 피어 블록 추가 성공: height={new_height}")
             # Mempool에서 포함된 TX 제거
             for tx in block.transactions[1:]:  # coinbase 제외
                 mempool.remove_tx(tx.get_txid())
+
+            # pending commit block_height 업데이트
+            rpc._update_pending_commits_for_block(block, new_height)
 
             # Reorg 발생 시 disconnect된 TX를 mempool에 복원
             disconnected_txs = blockchain.pop_disconnected_txs()

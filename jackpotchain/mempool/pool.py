@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from collections import OrderedDict
 
 from ..core.transaction import Transaction
-from ..core.utxo import UTXOSet
+from ..core.utxo import UTXO, UTXOSet
 from ..validation.transaction import validate_transaction
 from ..constants import MAX_MEMPOOL_SIZE, MAX_TX_SIZE, MIN_RELAY_FEE
 
@@ -79,8 +79,8 @@ class Mempool:
         if tx_size > MAX_TX_SIZE:
             return False, f"TX too large: {tx_size} > {MAX_TX_SIZE}"
 
-        # 검증
-        result = validate_transaction(tx, utxo_set, current_height)
+        # 검증 (mempool 내 부모 TX 출력도 참조 가능)
+        result = validate_transaction(tx, utxo_set, current_height, mempool=self)
         if not result.is_valid:
             return False, f"Invalid TX: {result.message}"
 
@@ -194,7 +194,7 @@ class Mempool:
 
     def get_txs_for_block(self, max_size: int = 900000) -> List[Transaction]:
         """
-        블록에 포함할 TX 선택 (수수료율 순)
+        블록에 포함할 TX 선택 (수수료율 순, 의존성 해결)
 
         Args:
             max_size: 최대 크기 (바이트)
@@ -213,20 +213,33 @@ class Mempool:
             reverse=True
         )
 
-        for entry in sorted_entries:
-            txid = entry.tx.get_txid()
+        # 의존성 해결을 위해 반복 (부모 포함 후 자식 재시도)
+        remaining = sorted_entries
+        while remaining:
+            deferred = []
+            progress = False
 
-            # 의존 TX가 모두 포함되어야 함
-            if not entry.depends_on.issubset(included):
-                print(f"[Mempool] TX {txid.hex()[:16]} skipped - depends on {len(entry.depends_on)} unincluded TXs")
-                continue
+            for entry in remaining:
+                txid = entry.tx.get_txid()
 
-            if total_size + entry.size > max_size:
-                continue
+                if txid in included:
+                    continue
 
-            selected.append(entry.tx)
-            included.add(txid)
-            total_size += entry.size
+                if not entry.depends_on.issubset(included):
+                    deferred.append(entry)
+                    continue
+
+                if total_size + entry.size > max_size:
+                    continue
+
+                selected.append(entry.tx)
+                included.add(txid)
+                total_size += entry.size
+                progress = True
+
+            if not progress or not deferred:
+                break
+            remaining = deferred
 
         return selected
 
@@ -270,6 +283,30 @@ class Mempool:
         """UTXO가 mempool에서 이미 사용 중인지 확인"""
         outpoint = (tx_id, output_index)
         return outpoint in self._spent_outpoints
+
+    def get_unconfirmed_utxos(self, addresses: Set[str], get_address_from_script: callable) -> List[UTXO]:
+        """
+        mempool TX 출력 중 내 주소에 해당하고 아직 소비 안 된 UTXO 반환
+        (미확인 잔돈 사용 지원)
+        """
+        utxos = []
+        for entry in self._entries.values():
+            tx = entry.tx
+            tx_id = tx.get_txid()
+            for idx, output in enumerate(tx.outputs):
+                # 이미 mempool 내 다른 TX가 소비한 출력은 제외
+                if (tx_id, idx) in self._spent_outpoints:
+                    continue
+                addr = get_address_from_script(output.script_pubkey)
+                if addr and addr in addresses:
+                    utxos.append(UTXO(
+                        tx_id=tx_id,
+                        output_index=idx,
+                        output=output,
+                        block_height=0,
+                        is_coinbase=False,
+                    ))
+        return utxos
 
     def clear(self):
         """초기화"""

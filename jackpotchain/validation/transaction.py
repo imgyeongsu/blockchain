@@ -23,6 +23,25 @@ from ..constants import (
     COINBASE_MATURITY,
 )
 
+
+def _resolve_utxo(tx_id: bytes, output_index: int, utxo_set: UTXOSet, mempool=None) -> Optional[UTXO]:
+    """UTXO 조회 (확정 UTXO → mempool/블록 내 TX fallback)"""
+    utxo = utxo_set.get_utxo(tx_id, output_index)
+    if utxo is not None:
+        return utxo
+    # mempool 또는 블록 내 부모 TX 출력에서 조회
+    if mempool is not None:
+        tx = mempool.get_tx(tx_id)
+        if tx and output_index < len(tx.outputs):
+            return UTXO(
+                tx_id=tx_id,
+                output_index=output_index,
+                output=tx.outputs[output_index],
+                block_height=0,
+                is_coinbase=False,
+            )
+    return None
+
 if TYPE_CHECKING:
     from ..consensus.chain import Blockchain
 
@@ -133,14 +152,15 @@ def validate_tx_scripts(
     tx: Transaction,
     utxo_set: UTXOSet,
     current_height: int,
-    blockchain: 'Blockchain' = None
+    blockchain: 'Blockchain' = None,
+    mempool=None,
 ) -> TxValidationResult:
     """트랜잭션 스크립트 검증"""
     if tx.is_coinbase():
         return TxValidationResult(is_valid=True)
 
     for idx, inp in enumerate(tx.inputs):
-        utxo = utxo_set.get_utxo(inp.prev_tx_id, inp.output_index)
+        utxo = _resolve_utxo(inp.prev_tx_id, inp.output_index, utxo_set, mempool)
         if utxo is None:
             return TxValidationResult(
                 is_valid=False,
@@ -190,7 +210,8 @@ def validate_tx_scripts(
 
 def validate_tx_amounts(
     tx: Transaction,
-    utxo_set: UTXOSet
+    utxo_set: UTXOSet,
+    mempool=None,
 ) -> TxValidationResult:
     """트랜잭션 금액 검증"""
     if tx.is_coinbase():
@@ -198,7 +219,7 @@ def validate_tx_amounts(
 
     total_input = 0
     for inp in tx.inputs:
-        utxo = utxo_set.get_utxo(inp.prev_tx_id, inp.output_index)
+        utxo = _resolve_utxo(inp.prev_tx_id, inp.output_index, utxo_set, mempool)
         if utxo is None:
             return TxValidationResult(
                 is_valid=False,
@@ -231,7 +252,8 @@ def validate_transaction(
     tx: Transaction,
     utxo_set: UTXOSet,
     current_height: int,
-    blockchain: 'Blockchain' = None
+    blockchain: 'Blockchain' = None,
+    mempool=None,
 ) -> TxValidationResult:
     """전체 트랜잭션 검증 (통합)"""
     result = validate_tx_structure(tx)
@@ -241,11 +263,11 @@ def validate_transaction(
     if tx.is_coinbase():
         return TxValidationResult(is_valid=True)
 
-    result = validate_tx_scripts(tx, utxo_set, current_height, blockchain)
+    result = validate_tx_scripts(tx, utxo_set, current_height, blockchain, mempool)
     if not result.is_valid:
         return result
 
-    result = validate_tx_amounts(tx, utxo_set)
+    result = validate_tx_amounts(tx, utxo_set, mempool)
     if not result.is_valid:
         return result
 

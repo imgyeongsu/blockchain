@@ -13,7 +13,7 @@ from enum import Enum
 from ..core.block import Block, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
-from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_numbers
+from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_numbers, is_payout_script, extract_payout_data
 from ..crypto.address import JACKPOT_POOL_ADDRESS
 from ..constants import TX_VERSION_COMMIT
 
@@ -388,6 +388,9 @@ class Blockchain:
             # Commit TX 인덱싱
             self._index_commit_tx(tx, height, block_hash)
 
+            # Payout TX 감지 → commit_index 갱신
+            self._index_payout_tx(tx, height)
+
         # Undo 데이터 저장 (나중에 disconnect용)
         self._undo_data[block_hash] = undo_data
 
@@ -412,6 +415,9 @@ class Blockchain:
 
             # Commit TX 인덱스 제거
             self._unindex_commit_tx(tx)
+
+            # Payout TX 인덱스 되돌리기
+            self._unindex_payout_tx(tx)
 
         # Undo 데이터 제거
         self._undo_data.pop(block_hash, None)
@@ -480,6 +486,26 @@ class Blockchain:
         tx_id = tx.get_txid()
         if tx_id in self._commit_index:
             del self._commit_index[tx_id]
+
+    def _index_payout_tx(self, tx, height: int):
+        """Payout TX 감지 → 원본 Commit의 payout_height 갱신"""
+        for output in tx.outputs:
+            payout_data = extract_payout_data(output.script_pubkey)
+            if payout_data:
+                commit_tx_id = payout_data[0]  # (commit_tx_id, chosen, result, matches)
+                if commit_tx_id in self._commit_index:
+                    self._commit_index[commit_tx_id].payout_height = height
+                return
+
+    def _unindex_payout_tx(self, tx):
+        """Payout TX 인덱스 되돌리기 (reorg 시 payout_height 초기화)"""
+        for output in tx.outputs:
+            payout_data = extract_payout_data(output.script_pubkey)
+            if payout_data:
+                commit_tx_id = payout_data[0]
+                if commit_tx_id in self._commit_index:
+                    self._commit_index[commit_tx_id].payout_height = 0
+                return
 
     def pop_disconnected_txs(self) -> list:
         """Reorg 시 disconnect된 TX 목록 반환 및 초기화 (mempool 복원용)"""
