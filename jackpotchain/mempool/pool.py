@@ -266,6 +266,11 @@ class Mempool:
         """모든 txid 반환"""
         return list(self._entries.keys())
 
+    def is_utxo_spent(self, tx_id: bytes, output_index: int) -> bool:
+        """UTXO가 mempool에서 이미 사용 중인지 확인"""
+        outpoint = (tx_id, output_index)
+        return outpoint in self._spent_outpoints
+
     def clear(self):
         """초기화"""
         self._entries.clear()

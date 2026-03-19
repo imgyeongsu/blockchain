@@ -458,10 +458,14 @@ class RPCServer:
 
         amount_satoshi = int(amount * 100_000_000)
 
+        # mempool 체크 함수
+        is_spent = self.mempool.is_utxo_spent if self.mempool else None
+
         tx, error = self.wallet.create_transaction(
             self.blockchain.utxo_set,
             [(address, amount_satoshi)],
-            current_height=self.blockchain.get_height()
+            current_height=self.blockchain.get_height(),
+            is_spent_in_mempool=is_spent
         )
 
         if tx is None:
@@ -993,8 +997,12 @@ class RPCServer:
         utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
         current_height = self.blockchain.get_height()
 
-        # Mature UTXO만 선택
-        mature_utxos = [u for u in utxos if u.is_mature(current_height)]
+        # Mature UTXO만 선택 + mempool에서 사용 중이 아닌 것
+        mature_utxos = [
+            u for u in utxos
+            if u.is_mature(current_height)
+            and not (self.mempool and self.mempool.is_utxo_spent(u.tx_id, u.output_index))
+        ]
 
         # 충분한 JACK 수집
         selected = []
