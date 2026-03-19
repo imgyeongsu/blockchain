@@ -4,6 +4,8 @@
 1. [동기화 문제](#1-동기화-문제)
 2. [UTXO/잔액 문제](#2-utxo잔액-문제)
 3. [네트워크 문제](#3-네트워크-문제)
+4. [트랜잭션 문제](#4-트랜잭션-문제)
+5. [코드 점검 결과 (2026-03-20)](#5-코드-점검-결과-2026-03-20)
 
 ---
 
@@ -345,6 +347,146 @@ curl -d '{"method":"getblockhash","params":[100],"id":1}' http://127.0.0.1:9335
 rm -rf ./data/blocks ./data/utxo
 python -m jackpotchain.cli.main node --seed 54.116.13.57:9333
 ```
+
+---
+
+## 5. 코드 점검 결과 (2026-03-20)
+
+### 🔴 Critical (즉시 수정 필요)
+
+#### 5.1 Reorg 시 TX가 mempool에 복원되지 않음
+
+**위치**: `jackpotchain/consensus/chain.py:340-341`
+
+**원인**
+`_disconnect_block()`에서 UTXO는 되돌리지만, 해당 블록에 포함되었던 TX를 mempool에 되돌려주는 코드가 없음.
+
+**결과**
+체인 재조직(reorg) 발생 시, 기존 메인 체인에만 있던 TX가 사라짐. 사용자 입장에서 송금한 TX가 증발하는 현상 발생. 새 체인에서 재채굴되지 않으면 영구 유실.
+
+---
+
+#### 5.2 저장소 로드 시 undo 데이터 미생성
+
+**위치**: `jackpotchain/consensus/chain.py:121-133`
+
+**원인**
+`_load_from_store()`에서 `_add_block_internal()` + 수동 `apply_transaction()` 호출. `_connect_block()`을 안 쓰기 때문에 `_undo_data`가 채워지지 않음.
+
+**결과**
+노드 재시작 후 reorg 발생하면, `_disconnect_block()`에서 `undo_data = []`이 되어 소비된 UTXO를 복원 불가. UTXO set 영구 오염 → 이후 모든 TX 검증 실패 가능.
+
+---
+
+#### 5.3 Reorg 시 Claim TX 인덱스 미복원
+
+**위치**: `jackpotchain/consensus/chain.py:394-395`
+
+**원인**
+`_disconnect_block()`에서 `_unindex_commit_tx()`는 호출하지만, Claim TX의 `claim_height` 되돌리기 없음. `_index_claim_tx()`의 역연산인 `_unindex_claim_tx()` 자체가 존재하지 않음.
+
+**결과**
+reorg로 Claim TX가 사이드 체인으로 밀려나도 `commit_index[commit_hash].claim_height`가 남아 있음. 해당 commit은 "이미 claim됨" 상태로 남아서 새 체인에서 다시 claim 불가 → 당첨금 수령 영구 불가.
+
+---
+
+### 🟡 Major (1주 내 수정)
+
+#### 5.4 Sync 피어 교체 시 `_requesting` 미초기화
+
+**위치**: `jackpotchain/network/node.py:448-449`
+
+**원인**
+새 INV 수신 시 `_pending_blocks`와 `_sync_peer`는 덮어쓰지만, 이전 피어에게 요청해둔 `_requesting` set은 그대로 유지.
+
+**결과**
+이전 피어가 응답하지 않은 블록 해시가 `_requesting`에 남아 있으면, 새 피어에게도 해당 블록을 요청하지 않음. `_request_next_block()`이 그 해시를 건너뛰어서 동기화가 영원히 멈춤.
+
+---
+
+#### 5.5 Sync 완료 시 `_requesting` 미초기화
+
+**위치**: `jackpotchain/network/node.py:554-556`
+
+**원인**
+동기화 완료 후 `_sync_peer = None`, `_block_buffer.clear()`는 하지만 `_requesting.clear()`가 없음.
+
+**결과**
+다음 동기화 때 이전 요청 잔여물이 남아서 블록을 건너뜀. 재시작 전까지 특정 블록을 영영 못 받을 수 있음.
+
+---
+
+#### 5.6 Sync 세션 타임아웃 없음
+
+**위치**: `jackpotchain/network/node.py:110`
+
+**원인**
+`_sync_peer` 설정 후 상대가 블록을 안 보내면 해제할 메커니즘 없음. 개별 read timeout(300s)은 있지만 전체 세션 타임아웃 없음.
+
+**결과**
+악의적/불안정 피어가 일부 블록만 보내고 멈추면, 노드가 영구 동기화 중 상태에 갇힘. `is_syncing = True`가 유지되어 다른 피어와 동기화도 불가.
+
+---
+
+#### 5.7 INV 메시지 TX 항목 수 무제한
+
+**위치**: `jackpotchain/network/node.py:424-433`
+
+**원인**
+블록은 `MAX_PENDING_BLOCKS`로 제한하지만, TX는 `inv_msg.items` 전체를 무제한 처리. `MAX_INV_SIZE=50000`이 constants에 있지만 사용되지 않음.
+
+**결과**
+악의적 피어가 수만 개 TX hash가 담긴 INV를 보내면 전부 GETDATA 요청. 메모리 폭증 + 네트워크 대역폭 고갈.
+
+---
+
+#### 5.8 `create_commit_tx` 반환 타입 불일치
+
+**위치**: `jackpotchain/gacha/game.py:135-137`
+
+**원인**
+정상 경로는 `(None, b'', b'', [], "에러메시지")`를 반환하지만, 주소 검증 실패 시 `[]` 대신 `0`(int)을 반환.
+
+```python
+return None, b'', b'', 0, f"Invalid player address: ..."  # ← int 0
+return None, b'', b'', [], f"Insufficient POT..."          # ← list []
+```
+
+**결과**
+호출부에서 `chosen_numbers`를 list로 기대하고 `len()` 등을 호출하면 TypeError 크래시. 주소가 잘못된 경우에만 발생하므로 정상 흐름에선 안 터지지만 에러 핸들링 시 문제.
+
+---
+
+#### 5.9 RPC `_wallet_file` 속성명 오류
+
+**위치**: `jackpotchain/rpc/server.py:1090`
+
+**원인**
+`self.wallet._wallet_file`을 참조하지만, Wallet 클래스의 실제 속성은 `self.wallet_file` (언더스코어 없음).
+
+```python
+# server.py:1090
+wallet_path = Path(self.wallet._wallet_file) if hasattr(self.wallet, '_wallet_file') else None
+# wallet.py:64
+self.wallet_file = Path(wallet_file)  # ← 실제 속성명
+```
+
+**결과**
+`hasattr` 체크가 항상 False → `wallet_path = None` → `wallet_dir` 없을 때 기본 지갑이 `self.wallets` dict에 등록 안 됨 → `listwallets` RPC에서 기본 지갑 누락.
+
+---
+
+### 🟠 Moderate (개선 권장)
+
+#### 5.10 부동소수점 → 정수 변환 오차
+
+**위치**: `jackpotchain/rpc/server.py:989`
+
+**원인**
+`int(jack_amount * COIN)` — 예를 들어 `int(0.29 * 100_000_000)` = `int(28999999.999999996)` = `28999999` (1 사토시 손실).
+
+**결과**
+특정 금액에서 1 사토시 오차 발생. 치명적이진 않지만 교환 비율 계산에서 미세한 금액 차이 유발.
 
 ---
 

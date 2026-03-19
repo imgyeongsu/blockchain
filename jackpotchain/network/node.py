@@ -50,6 +50,7 @@ class NodeConfig:
     rendezvous_port: int = DEFAULT_RENDEZVOUS_PORT  # 8334
     rendezvous_seeds: list = None  # 랑데부 시드 노드 (ip:port)
     is_seed_node: bool = False  # True면 랑데부 서버도 실행
+    allow_private_ip: bool = False  # True면 사설 IP 피어도 캐시 허용 (로컬 테스트용)
 
 
 class Node:
@@ -77,7 +78,7 @@ class Node:
         )
 
         # 피어 발견
-        self.discovery = PeerDiscovery(self.config.data_dir)
+        self.discovery = PeerDiscovery(self.config.data_dir, allow_private_ip=self.config.allow_private_ip)
 
         # NAT 자동 포트 매핑
         self.nat_manager: Optional[NATManager] = None
