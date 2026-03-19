@@ -141,14 +141,14 @@ async def run_single_node(node_id: str, data_dir: str = None):
                 tip = blockchain.get_tip()
                 txs = mempool.get_txs_for_block()
 
+                height = blockchain.get_height() + 1
                 template = create_block_template(
                     prev_block=tip,
                     miner_address=TEST_MINER_ADDRESS,
                     transactions=txs,
-                    difficulty_target=tip.header.difficulty_target
+                    difficulty_target=tip.header.difficulty_target,
+                    height=height
                 )
-
-                height = blockchain.get_height() + 1
 
                 # 비동기 채굴
                 result = await asyncio.get_event_loop().run_in_executor(

@@ -2,6 +2,17 @@
 JackpotChain 전역 상수
 """
 
+import os
+
+
+def get_default_data_dir() -> str:
+    """기본 데이터 디렉토리 (%APPDATA%/JackpotChain/data 또는 ~/.jackpotchain/data)"""
+    if os.name == 'nt':  # Windows
+        appdata = os.environ.get('APPDATA', os.path.expanduser('~'))
+        return os.path.join(appdata, 'JackpotChain', 'data')
+    else:  # Linux/Mac
+        return os.path.expanduser('~/.jackpotchain/data')
+
 # =============================================================================
 # 네트워크 파라미터
 # =============================================================================

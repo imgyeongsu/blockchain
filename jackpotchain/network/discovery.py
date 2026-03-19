@@ -17,7 +17,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from .peer import PeerAddress
-from ..constants import DEFAULT_PORT
+from ..constants import DEFAULT_PORT, get_default_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +68,7 @@ class PeerCache:
     """
 
     def __init__(self, data_dir: str = None):
-        if data_dir is None:
-            data_dir = os.path.expanduser("~/.jackpotchain")
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(data_dir or get_default_data_dir())
         self.cache_file = self.data_dir / "peers.json"
         self._peers: dict[str, CachedPeer] = {}  # key: "ip:port"
         self._max_peers = 2000  # 최대 캐시 수
