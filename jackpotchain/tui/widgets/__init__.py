@@ -4,7 +4,7 @@ from .dashboard import DashboardWidget
 from .wallet import WalletWidget
 from .mining import MiningWidget
 from .lotto import LottoWidget
-from .claims import ClaimsWidget
+from .history import HistoryWidget
 from .network import NetworkWidget
 
 __all__ = [
@@ -12,6 +12,6 @@ __all__ = [
     'WalletWidget',
     'MiningWidget',
     'LottoWidget',
-    'ClaimsWidget',
+    'HistoryWidget',
     'NetworkWidget',
 ]

@@ -65,6 +65,7 @@ class LottoScreen(Screen):
                     Button("[R] Random", id="btn-random", variant="primary"),
                     classes="action-buttons",
                 ),
+                Static("Auto-payout at N+18 block. Check results in History tab.", classes="info-text"),
                 classes="stat-box",
             ),
 
@@ -78,7 +79,7 @@ class LottoScreen(Screen):
         """마운트 시"""
         # 테이블 설정
         table = self.query_one("#commits-table", DataTable)
-        table.add_columns("Numbers", "Block", "Status", "Action")
+        table.add_columns("Numbers", "Block", "Status", "Payout")
 
         self.refresh_data()
         self.set_interval(5, self.refresh_data)
@@ -115,24 +116,25 @@ class LottoScreen(Screen):
 
                 # 상태
                 status = c.get("status", "unknown")
-                if status == "claimable":
-                    status_str = "✓ CLAIMABLE"
+                blocks_left = c.get("blocks_until_payout", 0)
+                if status == "auto_paid":
+                    status_str = "PAID"
                 elif status == "pending":
-                    blocks_left = c.get("blocks_until_claimable", 0)
-                    status_str = f"◐ {blocks_left} blocks"
+                    status_str = f"D-{blocks_left}"
                 elif status == "pending_mine":
-                    status_str = "⏳ Mining..."
+                    status_str = "MINING..."
                 else:
                     status_str = status.upper()
 
-                # 액션
-                action = "Claim" if c.get("can_claim") else "--"
+                # 지급 블록
+                payout_block = c.get("payout_block", 0)
+                payout_str = f"#{payout_block}" if payout_block else "--"
 
                 table.add_row(
                     num_str,
                     f"#{c.get('commit_height', 0)}",
                     status_str,
-                    action,
+                    payout_str,
                 )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -178,49 +180,8 @@ class LottoScreen(Screen):
             data = resp.result
             chosen = data.get("chosen_hex", [])
             self.query_one("#lotto-status", Label).update(
-                f"Committed! Numbers: {' '.join(chosen)}. Wait for N+18 blocks to claim."
+                f"Committed! Numbers: {' '.join(chosen)}. Auto-payout at N+18."
             )
-            self.refresh_data()
-        else:
-            self.query_one("#lotto-status", Label).update(f"Error: {resp.error}")
-
-    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """테이블 행 선택 시"""
-        # Claim 가능한 커밋 처리
-        self.run_worker(self._handle_row_click(event.cursor_row))
-
-    async def _handle_row_click(self, row_index: int) -> None:
-        """행 클릭 처리"""
-        resp = await self.rpc.list_lotto_commits()
-        if not resp.success or not resp.result:
-            return
-
-        commits = resp.result
-        if row_index >= len(commits):
-            return
-
-        commit = commits[row_index]
-        if commit.get("can_claim"):
-            commit_hash = commit.get("commit_hash")
-            await self._claim_commit(commit_hash)
-
-    async def _claim_commit(self, commit_hash: str) -> None:
-        """커밋 클레임"""
-        resp = await self.rpc.lotto_claim(commit_hash)
-        if resp.success:
-            data = resp.result
-            matches = data.get("matches", 0)
-            prize = data.get("prize", "NONE")
-            payout = data.get("payout_jack", 0)
-
-            if matches > 0:
-                self.query_one("#lotto-status", Label).update(
-                    f"🎉 {matches} matches! Prize: {prize}, Payout: {payout} JACK"
-                )
-            else:
-                self.query_one("#lotto-status", Label).update(
-                    f"No matches. Better luck next time!"
-                )
             self.refresh_data()
         else:
             self.query_one("#lotto-status", Label).update(f"Error: {resp.error}")
