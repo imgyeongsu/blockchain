@@ -740,13 +740,14 @@ class RPCServer:
                 if not (0 <= d <= 15):
                     raise Exception("Each number must be 0-15 (hex 0x0-0xf)")
 
-        # Commit TX 생성 (mempool에서 사용 중인 UTXO 제외)
+        # Commit TX 생성 (mempool에서 사용 중인 UTXO 제외, 미확인 잔돈 포함)
         tx, pending, error = self.gacha_service.create_commit(
             wallet=self.wallet,
             utxo_set=self.blockchain.utxo_set,
             current_height=self.blockchain.get_height(),
             chosen_numbers=chosen_numbers,
-            is_spent_in_mempool=self.mempool.is_utxo_spent if self.mempool else None
+            is_spent_in_mempool=self.mempool.is_utxo_spent if self.mempool else None,
+            mempool=self.mempool,
         )
 
         if error:

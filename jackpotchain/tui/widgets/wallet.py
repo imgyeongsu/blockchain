@@ -30,6 +30,8 @@ class WalletWidget(ScrollableContainer):
         self._wallets: Dict[str, Wallet] = {}
         # 주소별 잔액 캐시: {주소: 잔액 또는 None}
         self._balances: Dict[str, Optional[float]] = {}
+        # 주소별 POT 잔액 캐시
+        self._pot_balances: Dict[str, Optional[float]] = {}
         # 주소 → 지갑 매핑: {주소: 파일명}
         self._addr_to_wallet: Dict[str, str] = {}
         # 노드 연결 상태
@@ -207,15 +209,16 @@ class WalletWidget(ScrollableContainer):
 
             # 지갑 잔액 합계
             if self._node_connected:
-                wallet_total = sum(
+                wallet_jack = sum(
                     self._balances.get(addr, 0) or 0
-                    for addr in addresses
+                    for addr in list(addresses) + list(watch_only)
                 )
-                wallet_total += sum(
-                    self._balances.get(addr, 0) or 0
-                    for addr in watch_only
+                wallet_pot = sum(
+                    self._pot_balances.get(addr, 0) or 0
+                    for addr in list(addresses) + list(watch_only)
                 )
-                header_text = f"{prefix} {wallet_name}.json ({len(addresses)} addr) - {wallet_total:,.2f} JACK"
+                pot_str = f" | {wallet_pot:,.2f} POT" if wallet_pot > 0 else ""
+                header_text = f"{prefix} {wallet_name}.json ({len(addresses)} addr) - {wallet_jack:,.2f} JACK{pot_str}"
             else:
                 header_text = f"{prefix} {wallet_name}.json ({len(addresses)} addr) - -- JACK"
             header_item = ListItem(Label(header_text))
@@ -227,7 +230,9 @@ class WalletWidget(ScrollableContainer):
                 prefix = "[*]" if addr == self.app.selected_address else "   "
                 if self._node_connected:
                     balance = self._balances.get(addr, 0) or 0
-                    addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK"
+                    pot = self._pot_balances.get(addr, 0) or 0
+                    pot_str = f" | {pot:,.2f} POT" if pot > 0 else ""
+                    addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK{pot_str}"
                 else:
                     addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : -- JACK"
 
@@ -240,7 +245,9 @@ class WalletWidget(ScrollableContainer):
                 prefix = "[*]" if addr == self.app.selected_address else "   "
                 if self._node_connected:
                     balance = self._balances.get(addr, 0) or 0
-                    addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK (watch)"
+                    pot = self._pot_balances.get(addr, 0) or 0
+                    pot_str = f" | {pot:,.2f} POT" if pot > 0 else ""
+                    addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : {balance:,.2f} JACK{pot_str} (watch)"
                 else:
                     addr_text = f"  {prefix} {addr[:16]}...{addr[-6:]} : -- JACK (watch)"
 
@@ -288,10 +295,12 @@ class WalletWidget(ScrollableContainer):
                     jack = data.get('jack', 0)
                     pot = data.get('pot', 0)
                     self._balances[addr] = jack
+                    self._pot_balances[addr] = pot
                     total_jack += jack
                     total_pot += pot
                 else:
                     self._balances[addr] = 0
+                    self._pot_balances[addr] = 0
             except Exception:
                 self._balances[addr] = 0
 
