@@ -13,6 +13,7 @@ from pathlib import Path
 from ..core.block import Block
 from ..core.transaction import Transaction
 from ..core.utxo import UTXO, UTXOSet
+from ..constants import get_default_data_dir
 
 
 class BlockStore:
@@ -25,8 +26,8 @@ class BlockStore:
     - utxo/    : UTXO 스냅샷
     """
 
-    def __init__(self, data_dir: str = "./data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        self.data_dir = Path(data_dir or get_default_data_dir())
         self.blocks_dir = self.data_dir / "blocks"
         self.index_dir = self.data_dir / "index"
         self.utxo_dir = self.data_dir / "utxo"
@@ -144,8 +145,8 @@ class BlockStore:
 class TxIndex:
     """트랜잭션 인덱스 (txid → 블록 위치)"""
 
-    def __init__(self, data_dir: str = "./data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: str = None):
+        self.data_dir = Path(data_dir or get_default_data_dir())
         self.index_file = self.data_dir / "index" / "tx_index.dat"
 
         # txid → (block_hash, tx_index_in_block)

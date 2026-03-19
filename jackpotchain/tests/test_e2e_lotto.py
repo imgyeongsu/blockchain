@@ -129,7 +129,8 @@ class TestLottoE2E:
                 prev_block=tip,
                 miner_address=miner_address,
                 transactions=txs,
-                difficulty_target=difficulty
+                difficulty_target=difficulty,
+                height=blockchain.get_height() + 1
             )
 
             # 채굴 (테스트용 - 난이도 상승에 대비해 충분한 nonce)
@@ -536,7 +537,8 @@ class TestLottoE2E:
                 prev_block=tip,
                 miner_address=miner_address,
                 transactions=txs,
-                difficulty_target=difficulty
+                difficulty_target=difficulty,
+                height=blockchain.get_height() + 1
             )
 
             # 채굴

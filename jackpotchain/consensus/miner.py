@@ -106,7 +106,8 @@ def create_block_template(
     prev_block: Block,
     miner_address: str,
     transactions: List[Transaction],
-    difficulty_target: int
+    difficulty_target: int,
+    height: int
 ) -> Block:
     """
     블록 템플릿 생성 (채굴 준비)
@@ -116,6 +117,7 @@ def create_block_template(
         miner_address: 채굴자 주소
         transactions: 포함할 트랜잭션들 (coinbase 제외)
         difficulty_target: 난이도
+        height: 새 블록의 높이
 
     Returns:
         block_template: 채굴할 블록 (nonce=0)
@@ -123,8 +125,7 @@ def create_block_template(
     # 수수료 계산
     total_fees = sum(tx.fee for tx in transactions if hasattr(tx, 'fee') and tx.fee)
 
-    # Coinbase TX
-    height = prev_block.header.timestamp + 1  # 임시 높이 (실제로는 외부에서 관리)
+    # Coinbase TX (height는 파라미터로 전달받음)
     coinbase_tx = create_coinbase_tx(
         block_height=height,
         miner_address=miner_address,

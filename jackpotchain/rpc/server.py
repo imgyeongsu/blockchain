@@ -604,7 +604,8 @@ class RPCServer:
                     prev_block=tip,
                     miner_address=self._mining_address,
                     transactions=txs,
-                    difficulty_target=difficulty
+                    difficulty_target=difficulty,
+                    height=self.blockchain.get_height() + 1
                 )
 
                 # 비동기 채굴 (블로킹 방지)

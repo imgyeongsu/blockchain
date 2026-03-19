@@ -173,14 +173,14 @@ def run_node(args):
                     blockchain.get_block_by_height
                 )
 
+                height = blockchain.get_height() + 1
                 template = create_block_template(
                     prev_block=tip,
                     miner_address=args.address,
                     transactions=txs,
-                    difficulty_target=difficulty
+                    difficulty_target=difficulty,
+                    height=height
                 )
-
-                height = blockchain.get_height() + 1
                 print(f"\n[Miner] Mining block {height}...")
 
                 # 비동기로 채굴 (작은 단위로 나눠서)
@@ -367,14 +367,16 @@ def run_miner(args):
                 blockchain.get_block_by_height
             )
 
+            height = blockchain.get_height() + 1
             template = create_block_template(
                 prev_block=tip,
                 miner_address=args.address,
                 transactions=txs,
-                difficulty_target=difficulty
+                difficulty_target=difficulty,
+                height=height
             )
 
-            print(f"\nMining block {blockchain.get_height() + 1}...")
+            print(f"\nMining block {height}...")
 
             result = mine_block(template, callback=mining_callback)
 

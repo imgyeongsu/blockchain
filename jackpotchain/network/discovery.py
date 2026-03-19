@@ -17,7 +17,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 from .peer import PeerAddress
-from ..constants import DEFAULT_PORT
+from ..constants import DEFAULT_PORT, get_default_data_dir
 
 logger = logging.getLogger(__name__)
 
