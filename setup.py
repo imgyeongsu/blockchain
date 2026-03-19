@@ -16,6 +16,7 @@ setup(
         "ecdsa>=0.19.0",
         "textual>=0.50.0",
         "rich>=13.0.0",
+        "cryptography>=42.0.0",
     ],
     extras_require={
         "dev": [

@@ -3,6 +3,7 @@ Step 13: 지갑
 - 키 관리
 - 주소 생성
 - TX 서명
+- 개인키 암호화 (AES-256-GCM)
 """
 
 import os
@@ -15,6 +16,11 @@ from pathlib import Path
 from ..crypto.signature import generate_keypair, sign, private_key_to_public_key
 from ..crypto.address import pubkey_to_address, validate_address
 from ..crypto.hash import sha256, double_sha256
+from ..crypto.encryption import (
+    encrypt_private_key,
+    decrypt_private_key,
+    is_encryption_available,
+)
 from ..core.transaction import Transaction, TxInput, TxOutput
 from ..core.utxo import UTXO, UTXOSet
 from ..script.standard import create_p2pkh_script_pubkey, create_p2pkh_script_sig
@@ -26,7 +32,7 @@ class AddressInfo:
     """주소 정보"""
     address: str
     public_key: bytes
-    private_key: bytes  # 암호화 필요!
+    private_key: bytes  # 메모리에서는 복호화된 상태
     label: str = ""
     created_at: float = 0
     is_change: bool = False
@@ -51,9 +57,10 @@ class Wallet:
     - 키 생성/관리
     - 잔액 조회
     - TX 생성/서명
+    - 개인키 암호화 (AES-256-GCM + PBKDF2)
     """
 
-    def __init__(self, wallet_file: str = None):
+    def __init__(self, wallet_file: str = None, password: str = None):
         self.wallet_file = Path(wallet_file) if wallet_file else None
 
         # 주소 → AddressInfo
@@ -64,6 +71,11 @@ class Wallet:
 
         # 거래 내역
         self._transactions: Dict[bytes, WalletTx] = {}
+
+        # 암호화 관련
+        self._password: Optional[str] = password
+        self._encrypted: bool = False
+        self._locked: bool = False
 
         # 로드
         if self.wallet_file and self.wallet_file.exists():
@@ -77,15 +89,49 @@ class Wallet:
         with open(self.wallet_file, 'r') as f:
             data = json.load(f)
 
+        self._encrypted = data.get('encrypted', False)
+
         for addr_data in data.get('addresses', []):
-            info = AddressInfo(
-                address=addr_data['address'],
-                public_key=bytes.fromhex(addr_data['public_key']),
-                private_key=bytes.fromhex(addr_data['private_key']),
-                label=addr_data.get('label', ''),
-                created_at=addr_data.get('created_at', 0),
-                is_change=addr_data.get('is_change', False)
-            )
+            # 암호화된 지갑
+            if self._encrypted:
+                if not self._password:
+                    # 잠금 상태 - 공개키만 로드
+                    self._locked = True
+                    info = AddressInfo(
+                        address=addr_data['address'],
+                        public_key=bytes.fromhex(addr_data['public_key']),
+                        private_key=b'',  # 잠금 상태
+                        label=addr_data.get('label', ''),
+                        created_at=addr_data.get('created_at', 0),
+                        is_change=addr_data.get('is_change', False)
+                    )
+                else:
+                    # 복호화
+                    encrypted_key = bytes.fromhex(addr_data['private_key'])
+                    try:
+                        private_key = decrypt_private_key(encrypted_key, self._password)
+                    except ValueError as e:
+                        raise ValueError(f"지갑 복호화 실패: {e}")
+
+                    info = AddressInfo(
+                        address=addr_data['address'],
+                        public_key=bytes.fromhex(addr_data['public_key']),
+                        private_key=private_key,
+                        label=addr_data.get('label', ''),
+                        created_at=addr_data.get('created_at', 0),
+                        is_change=addr_data.get('is_change', False)
+                    )
+            else:
+                # 평문 지갑 (하위 호환)
+                info = AddressInfo(
+                    address=addr_data['address'],
+                    public_key=bytes.fromhex(addr_data['public_key']),
+                    private_key=bytes.fromhex(addr_data['private_key']),
+                    label=addr_data.get('label', ''),
+                    created_at=addr_data.get('created_at', 0),
+                    is_change=addr_data.get('is_change', False)
+                )
+
             self._addresses[info.address] = info
 
         self._watch_only = set(data.get('watch_only', []))
@@ -95,25 +141,113 @@ class Wallet:
         if not self.wallet_file:
             return
 
+        if self._locked:
+            raise RuntimeError("지갑이 잠금 상태입니다. unlock() 후 저장하세요.")
+
         self.wallet_file.parent.mkdir(parents=True, exist_ok=True)
 
+        addresses_data = []
+        for info in self._addresses.values():
+            if self._password and is_encryption_available():
+                # 암호화하여 저장
+                encrypted_key = encrypt_private_key(info.private_key, self._password)
+                private_key_hex = encrypted_key.hex()
+            else:
+                # 평문 저장 (하위 호환)
+                private_key_hex = info.private_key.hex()
+
+            addresses_data.append({
+                'address': info.address,
+                'public_key': info.public_key.hex(),
+                'private_key': private_key_hex,
+                'label': info.label,
+                'created_at': info.created_at,
+                'is_change': info.is_change,
+            })
+
         data = {
-            'addresses': [
-                {
-                    'address': info.address,
-                    'public_key': info.public_key.hex(),
-                    'private_key': info.private_key.hex(),
-                    'label': info.label,
-                    'created_at': info.created_at,
-                    'is_change': info.is_change,
-                }
-                for info in self._addresses.values()
-            ],
+            'encrypted': bool(self._password and is_encryption_available()),
+            'addresses': addresses_data,
             'watch_only': list(self._watch_only),
         }
 
         with open(self.wallet_file, 'w') as f:
             json.dump(data, f, indent=2)
+
+    def is_encrypted(self) -> bool:
+        """지갑이 암호화되어 있는지"""
+        return self._encrypted
+
+    def is_locked(self) -> bool:
+        """지갑이 잠금 상태인지"""
+        return self._locked
+
+    def unlock(self, password: str) -> bool:
+        """
+        지갑 잠금 해제
+
+        Returns:
+            True: 성공, False: 실패
+        """
+        if not self._encrypted:
+            return True  # 암호화 안 된 지갑
+
+        if not self._locked:
+            return True  # 이미 잠금 해제됨
+
+        self._password = password
+        try:
+            self._load()
+            self._locked = False
+            return True
+        except ValueError:
+            self._password = None
+            return False
+
+    def lock(self):
+        """지갑 잠금 (메모리에서 개인키 제거)"""
+        if not self._encrypted:
+            return
+
+        for info in self._addresses.values():
+            info.private_key = b''
+
+        self._password = None
+        self._locked = True
+
+    def encrypt_wallet(self, password: str) -> bool:
+        """
+        기존 지갑 암호화
+
+        Args:
+            password: 암호화 비밀번호
+
+        Returns:
+            True: 성공
+        """
+        if not is_encryption_available():
+            raise RuntimeError("cryptography 라이브러리가 필요합니다")
+
+        if self._locked:
+            raise RuntimeError("지갑이 잠금 상태입니다")
+
+        self._password = password
+        self._encrypted = True
+        self._save()
+        return True
+
+    def change_password(self, old_password: str, new_password: str) -> bool:
+        """비밀번호 변경"""
+        if not self._encrypted:
+            raise RuntimeError("암호화되지 않은 지갑입니다")
+
+        if self._locked:
+            if not self.unlock(old_password):
+                return False
+
+        self._password = new_password
+        self._save()
+        return True
 
     def generate_address(self, label: str = "", is_change: bool = False) -> str:
         """새 주소 생성"""
@@ -235,6 +369,9 @@ class Wallet:
         Returns:
             (transaction, error_message)
         """
+        if self._locked:
+            return None, "지갑이 잠금 상태입니다. unlock() 후 사용하세요."
+
         # 총 출금액
         total_out = sum(amount for _, amount in recipients) + fee
 
@@ -310,6 +447,9 @@ class Wallet:
         utxos: List[UTXO]
     ) -> Tuple[bool, str]:
         """TX 서명"""
+        if self._locked:
+            return False, "지갑이 잠금 상태입니다"
+
         for i, (inp, utxo) in enumerate(zip(tx.inputs, utxos)):
             address = self._find_address_for_utxo(utxo, None)
             if address is None or address not in self._addresses:
@@ -328,6 +468,9 @@ class Wallet:
 
     def export_private_key(self, address: str) -> Optional[bytes]:
         """개인키 내보내기"""
+        if self._locked:
+            return None
+
         info = self._addresses.get(address)
         return info.private_key if info else None
 
@@ -337,4 +480,6 @@ class Wallet:
             'addresses': len(self._addresses),
             'watch_only': len(self._watch_only),
             'transactions': len(self._transactions),
+            'encrypted': self._encrypted,
+            'locked': self._locked,
         }
