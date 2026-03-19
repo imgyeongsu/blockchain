@@ -117,8 +117,8 @@ class LottoScreen(Screen):
                 # 상태
                 status = c.get("status", "unknown")
                 blocks_left = c.get("blocks_until_payout", 0)
-                if status == "auto_paid":
-                    status_str = "PAID"
+                if status == "ready":
+                    status_str = "READY"
                 elif status == "pending":
                     status_str = f"D-{blocks_left}"
                 elif status == "pending_mine":

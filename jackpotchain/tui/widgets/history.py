@@ -70,8 +70,8 @@ class HistoryWidget(ScrollableContainer):
             status = c.get("status", "?")
             blocks_left = c.get("blocks_until_payout", 0)
 
-            if status == "auto_paid":
-                status_str = "PAID"
+            if status == "ready":
+                status_str = "READY"
             elif status == "pending":
                 status_str = f"D-{blocks_left}"
             elif status == "pending_mine":
@@ -79,9 +79,9 @@ class HistoryWidget(ScrollableContainer):
             else:
                 status_str = status.upper()[:10]
 
-            # 결과 컬럼: 지급 완료면 결과 표시, 아니면 대기
-            if status == "auto_paid":
-                result_str = "Check"
+            # 결과 컬럼
+            if status == "ready":
+                result_str = ">>> Check!"
             elif status == "pending":
                 result_str = f"{blocks_left} blocks"
             else:

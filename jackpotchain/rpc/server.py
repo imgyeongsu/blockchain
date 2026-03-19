@@ -855,10 +855,10 @@ class RPCServer:
 
             if c.block_height == 0:
                 status = "pending_mine"
-            elif current_height < payout_block:
+            elif current_height < comparison_heights[-1]:
                 status = "pending"
             else:
-                status = "auto_paid"
+                status = "ready"
 
             result.append({
                 'tx_id': c.tx_id.hex() if c.tx_id else '',
