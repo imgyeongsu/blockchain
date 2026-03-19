@@ -15,7 +15,7 @@ from .widgets.dashboard import DashboardWidget
 from .widgets.wallet import WalletWidget
 from .widgets.mining import MiningWidget
 from .widgets.lotto import LottoWidget
-from .widgets.claims import ClaimsWidget
+from .widgets.history import HistoryWidget
 from .widgets.network import NetworkWidget
 from .client import RPCClient
 from ..wallet.wallet import Wallet
@@ -33,7 +33,7 @@ class JackpotChainApp(App):
         Binding("f2", "show_tab('wallet')", "Wallet", show=True, priority=True),
         Binding("f3", "show_tab('mining')", "Mining", show=True, priority=True),
         Binding("f4", "show_tab('lotto')", "Lotto", show=True, priority=True),
-        Binding("f5", "show_tab('claims')", "Claims", show=True, priority=True),
+        Binding("f5", "show_tab('history')", "History", show=True, priority=True),
         Binding("f6", "show_tab('network')", "Network", show=True, priority=True),
         Binding("ctrl+r", "refresh", "Refresh", show=True, priority=True),
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
@@ -106,7 +106,7 @@ class JackpotChainApp(App):
             Static("[2] Wallet", id="menu-wallet", classes="menu-item"),
             Static("[3] Mining", id="menu-mining", classes="menu-item"),
             Static("[4] Lotto", id="menu-lotto", classes="menu-item"),
-            Static("[5] Claims", id="menu-claims", classes="menu-item"),
+            Static("[5] History", id="menu-history", classes="menu-item"),
             Static("[6] Network", id="menu-network", classes="menu-item"),
             id="menu-bar",
         )
@@ -116,7 +116,7 @@ class JackpotChainApp(App):
             WalletWidget(self.rpc, id="wallet"),
             MiningWidget(self.rpc, id="mining"),
             LottoWidget(self.rpc, id="lotto"),
-            ClaimsWidget(self.rpc, id="claims"),
+            HistoryWidget(self.rpc, id="history"),
             NetworkWidget(self.rpc, id="network"),
             initial="dashboard",
             id="content",
@@ -148,14 +148,14 @@ class JackpotChainApp(App):
             "wallet": "Wallet",
             "mining": "Mining",
             "lotto": "Lotto",
-            "claims": "Claims",
+            "history": "History",
             "network": "Network",
         }
         self.sub_title = titles.get(self._current_tab, "Dashboard")
 
     def _update_menu(self) -> None:
         """메뉴 바 업데이트"""
-        tabs = ["dashboard", "wallet", "mining", "lotto", "claims", "network"]
+        tabs = ["dashboard", "wallet", "mining", "lotto", "history", "network"]
         for tab in tabs:
             menu_item = self.query_one(f"#menu-{tab}", Static)
             if tab == self._current_tab:

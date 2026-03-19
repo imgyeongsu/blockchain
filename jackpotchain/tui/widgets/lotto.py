@@ -57,7 +57,7 @@ class LottoWidget(ScrollableContainer):
         yield Label("", id="lotto-status", classes="status-msg")
 
         # 안내
-        yield Label("Commits are shown in F5 Claims tab", classes="info-text")
+        yield Label("Results in F5 History tab (auto-payout at N+18)", classes="info-text")
 
     def on_mount(self) -> None:
         """마운트 시"""

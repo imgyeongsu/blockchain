@@ -9,7 +9,7 @@ Step 13: 지갑
 import os
 import json
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -329,18 +329,26 @@ class Wallet:
         self,
         utxo_set: UTXOSet,
         amount: int,
-        current_height: int = 0
+        current_height: int = 0,
+        is_spent_in_mempool: Callable[[bytes, int], bool] = None
     ) -> Tuple[List[UTXO], int]:
         """
         UTXO 선택
+
+        Args:
+            is_spent_in_mempool: mempool에서 UTXO 사용 여부 확인 함수
 
         Returns:
             (selected_utxos, total_value)
         """
         utxos = self.get_utxos(utxo_set)
 
-        # 성숙한 UTXO만
-        mature_utxos = [u for u in utxos if u.is_mature(current_height)]
+        # 성숙한 UTXO만 + mempool 미사용
+        mature_utxos = [
+            u for u in utxos
+            if u.is_mature(current_height)
+            and (is_spent_in_mempool is None or not is_spent_in_mempool(u.tx_id, u.output_index))
+        ]
 
         # 금액 순 정렬 (작은 것부터)
         mature_utxos.sort(key=lambda u: u.output.jack_value)
@@ -361,10 +369,14 @@ class Wallet:
         utxo_set: UTXOSet,
         recipients: List[Tuple[str, int]],  # (address, amount)
         fee: int = MIN_TX_FEE,
-        current_height: int = 0
+        current_height: int = 0,
+        is_spent_in_mempool: Callable[[bytes, int], bool] = None
     ) -> Tuple[Optional[Transaction], str]:
         """
         TX 생성 및 서명
+
+        Args:
+            is_spent_in_mempool: mempool에서 UTXO 사용 여부 확인 함수
 
         Returns:
             (transaction, error_message)
@@ -375,8 +387,10 @@ class Wallet:
         # 총 출금액
         total_out = sum(amount for _, amount in recipients) + fee
 
-        # UTXO 선택
-        selected, total_in = self.select_utxos(utxo_set, total_out, current_height)
+        # UTXO 선택 (mempool에서 사용 중인 UTXO 제외)
+        selected, total_in = self.select_utxos(
+            utxo_set, total_out, current_height, is_spent_in_mempool
+        )
 
         if total_in < total_out:
             return None, f"Insufficient funds: {total_in} < {total_out}"

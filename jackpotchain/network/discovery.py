@@ -192,6 +192,16 @@ class PeerCache:
             if p.last_seen > cutoff
         ]
 
+    def get_recent_good_peers(self, max_age: int = 7 * 24 * 3600, min_success: int = 1) -> List[PeerAddress]:
+        """최근 N초 이내에 연결 성공한 적 있는 피어"""
+        cutoff = int(time.time()) - max_age
+        good = [
+            p for p in self._peers.values()
+            if p.last_seen > cutoff and p.success >= min_success
+        ]
+        good.sort(key=lambda p: (p.success, p.last_seen), reverse=True)
+        return [p.to_peer_address() for p in good]
+
     def __len__(self) -> int:
         return len(self._peers)
 
@@ -206,10 +216,11 @@ class PeerDiscovery:
     4. ADDR 메시지로 피어 수집
     """
 
-    def __init__(self, data_dir: str = None):
+    def __init__(self, data_dir: str = None, allow_private_ip: bool = False):
         self.cache = PeerCache(data_dir)
         self._dns_seeds = list(DNS_SEEDS)
         self._hardcoded_seeds = list(HARDCODED_SEEDS)
+        self._allow_private_ip = allow_private_ip
 
     def initialize(self) -> List[PeerAddress]:
         """
@@ -219,22 +230,30 @@ class PeerDiscovery:
             초기 연결 시도할 피어 목록
         """
         # 1. 캐시 로드
-        cached_count = self.cache.load()
+        self.cache.load()
 
-        # 2. 캐시에 충분한 피어가 있으면 사용
-        if cached_count >= 10:
-            peers = self.cache.get_peers(count=20)
-            logger.info(f"Using {len(peers)} cached peers")
-            return peers
+        # 2. 최근 성공한 피어가 충분한지 확인 (단순 캐시 수가 아님)
+        recent_good = self.cache.get_recent_good_peers(max_age=7 * 24 * 3600, min_success=1)
 
-        # 3. 캐시 부족 시 시드 조회
+        if len(recent_good) >= 10:
+            logger.info(f"Using {len(recent_good)} recently successful cached peers")
+            return recent_good[:20]
+
+        # 3. 부족하면 시드 조회 + 캐시 합산
         seed_peers = self._query_seeds()
-
-        # 4. 캐시에 추가
         for addr in seed_peers:
             self.cache.add_from_peer_address(addr)
 
-        return seed_peers
+        # 캐시된 피어도 후보에 포함 (시드만으로 부족할 수 있음)
+        cached = self.cache.get_peers(count=20)
+        combined = list(seed_peers)
+        seen = {(p.ip, p.port) for p in combined}
+        for p in cached:
+            if (p.ip, p.port) not in seen:
+                combined.append(p)
+                seen.add((p.ip, p.port))
+
+        return combined[:20]
 
     def _query_seeds(self) -> List[PeerAddress]:
         """시드 노드 조회"""
@@ -283,9 +302,9 @@ class PeerDiscovery:
 
     def _is_valid_address(self, addr: PeerAddress) -> bool:
         """주소 유효성 검사"""
-        # 사설 IP 제외 (테스트 시에는 허용)
-        # if self._is_private_ip(addr.ip):
-        #     return False
+        # 사설 IP 제외 (allow_private_ip=True면 허용)
+        if not self._allow_private_ip and self._is_private_ip(addr.ip):
+            return False
 
         # 포트 범위 확인
         if not (1 <= addr.port <= 65535):

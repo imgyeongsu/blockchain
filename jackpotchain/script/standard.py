@@ -155,146 +155,95 @@ def get_address_from_script_pubkey(script_pubkey: bytes) -> Optional[str]:
 # === JackpotChain 특수 스크립트 ===
 
 # =============================================================================
-# 로또 Commit (16-2 Final)
+# 로또 Commit
 # =============================================================================
 
-def create_commit_script(commit_hash: bytes) -> bytes:
+def create_commit_script(chosen_numbers: list) -> bytes:
     """
     Lotto Commit TX용 OP_RETURN
 
-    Format: OP_RETURN "LOTTO" <commit_hash>
+    Format: OP_RETURN "LOTTO" <chosen_numbers(6 bytes)>
 
     Args:
-        commit_hash: SHA256(nonce || chosen_numbers) - 32 bytes
+        chosen_numbers: 6자리 숫자 배열 (각 0~15)
 
     Security:
-        숫자는 Commit에 포함하지 않음 (채굴자 공격 방어)
-        사용자가 nonce + 숫자를 로컬에 저장하고 Claim 시 공개
+        숫자가 평문으로 포함되지만, 당첨 판정은 N+18 블록 해시 기반이므로
+        commit 시점 채굴자는 결과를 조작할 수 없음
     """
-    data = b'LOTTO' + commit_hash
+    data = b'LOTTO' + bytes(chosen_numbers)
     return create_op_return_script(data)
 
 
 def is_commit_script(script: bytes) -> bool:
-    """Commit 스크립트인지 (LOTTO 또는 레거시 COMMIT)"""
+    """Commit 스크립트인지 (LOTTO prefix)"""
     data = extract_op_return_data(script)
     if data is None:
         return False
-    return data.startswith(b'LOTTO') or data.startswith(b'COMMIT')
+    return data.startswith(b'LOTTO')
 
 
-def extract_commit_hash(script: bytes) -> Optional[bytes]:
-    """Commit 스크립트에서 commit_hash 추출"""
-    data = extract_op_return_data(script)
-    if data is None:
-        return None
-
-    # LOTTO 형식 (신규)
-    if data.startswith(b'LOTTO') and len(data) >= 37:
-        return data[5:37]  # 32 bytes commit hash
-
-    # COMMIT 형식 (레거시)
-    if data.startswith(b'COMMIT') and len(data) >= 38:
-        return data[6:38]
-
-    return None
-
-
-def extract_commit_data(script: bytes) -> Optional[bytes]:
+def extract_commit_numbers(script: bytes) -> Optional[list]:
     """
-    Commit 스크립트에서 commit_hash 추출
+    Commit 스크립트에서 chosen_numbers 추출
 
     Returns:
-        commit_hash or None
-
-    Note:
-        숫자는 Commit에 포함되지 않음 (Claim 시 공개)
+        chosen_numbers (6자리 list) or None
     """
     data = extract_op_return_data(script)
     if data is None:
         return None
 
-    # LOTTO 형식: "LOTTO" + 32 bytes hash
-    if data.startswith(b'LOTTO') and len(data) >= 37:
-        return data[5:37]
-
-    # COMMIT 형식 (레거시): "COMMIT" + 32 bytes hash
-    if data.startswith(b'COMMIT') and len(data) >= 38:
-        return data[6:38]
+    # LOTTO 형식: "LOTTO" + 6 bytes numbers
+    if data.startswith(b'LOTTO') and len(data) >= 11:
+        return list(data[5:11])
 
     return None
 
 
 # =============================================================================
-# 로또 Claim (16-2 Final)
+# 로또 자동 지급 (Payout TX - 채굴자가 블록에 포함)
 # =============================================================================
 
-def create_claim_script(commit_hash: bytes, nonce: bytes, chosen_numbers: list) -> bytes:
+def create_lotto_payout_script(commit_tx_id: bytes, chosen_numbers: list, result_digits: list, matches: int) -> bytes:
     """
-    Lotto Claim TX용 OP_RETURN
+    로또 자동 지급 TX용 OP_RETURN (결과 기록)
 
-    Format: OP_RETURN "CLAIM" <commit_hash> <nonce> <chosen_numbers>
+    Format: OP_RETURN "PAYOUT" <commit_tx_id(32)> <chosen(6)> <result(6)> <matches(1)>
 
     Args:
-        commit_hash: 원래 Commit의 해시 - 32 bytes
-        nonce: 원래 Commit에 사용한 nonce - 32 bytes
-        chosen_numbers: 6자리 숫자 배열 - 6 bytes
+        commit_tx_id: 원본 Commit TX ID (32 bytes)
+        chosen_numbers: 선택한 숫자 (6 bytes)
+        result_digits: 블록해시 추출 결과 (6 bytes)
+        matches: 일치 수 (1 byte)
     """
-    data = b'CLAIM' + commit_hash + nonce + bytes(chosen_numbers)
+    data = b'PAYOUT' + commit_tx_id + bytes(chosen_numbers) + bytes(result_digits) + bytes([matches])
     return create_op_return_script(data)
 
 
-def is_claim_script(script: bytes) -> bool:
-    """Claim 스크립트인지"""
+def is_payout_script(script: bytes) -> bool:
+    """Payout 스크립트인지"""
     data = extract_op_return_data(script)
-    return data is not None and data.startswith(b'CLAIM')
+    return data is not None and data.startswith(b'PAYOUT')
 
 
-def extract_claim_data(script: bytes) -> Optional[Tuple[bytes, bytes, list]]:
+def extract_payout_data(script: bytes) -> Optional[Tuple[bytes, list, list, int]]:
     """
-    Claim 스크립트에서 (commit_hash, nonce, chosen_numbers) 추출
+    Payout 스크립트에서 데이터 추출
 
     Returns:
-        (commit_hash, nonce, chosen_numbers) or None
+        (commit_tx_id, chosen_numbers, result_digits, matches) or None
     """
     data = extract_op_return_data(script)
     if data is None:
         return None
 
-    # CLAIM 형식: "CLAIM" + 32 bytes hash + 32 bytes nonce + 6 bytes numbers
-    if data.startswith(b'CLAIM') and len(data) >= 75:
-        commit_hash = data[5:37]
-        nonce = data[37:69]
-        chosen_numbers = list(data[69:75])
-        return commit_hash, nonce, chosen_numbers
+    # PAYOUT 형식: "PAYOUT"(6) + tx_id(32) + chosen(6) + result(6) + matches(1) = 51
+    if data.startswith(b'PAYOUT') and len(data) >= 51:
+        commit_tx_id = data[6:38]
+        chosen_numbers = list(data[38:44])
+        result_digits = list(data[44:50])
+        matches = data[50]
+        return commit_tx_id, chosen_numbers, result_digits, matches
 
-    return None
-
-
-# =============================================================================
-# Reveal (deprecated - 하위 호환용)
-# =============================================================================
-
-def create_reveal_script(nonce: bytes, target: int) -> bytes:
-    """
-    [DEPRECATED] Reveal TX용 OP_RETURN
-    새 코드에서는 create_claim_script() 사용
-    """
-    data = b'REVEAL' + nonce + target.to_bytes(1, 'big')
-    return create_op_return_script(data)
-
-
-def is_reveal_script(script: bytes) -> bool:
-    """[DEPRECATED] Reveal 스크립트인지"""
-    data = extract_op_return_data(script)
-    return data is not None and data.startswith(b'REVEAL')
-
-
-def extract_reveal_data(script: bytes) -> Optional[Tuple[bytes, int]]:
-    """[DEPRECATED] Reveal 스크립트에서 (nonce, target) 추출"""
-    data = extract_op_return_data(script)
-    if data and data.startswith(b'REVEAL') and len(data) >= 39:
-        nonce = data[6:38]    # 32 bytes nonce
-        target = data[38]     # 1 byte target
-        return nonce, target
     return None

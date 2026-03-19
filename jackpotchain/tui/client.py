@@ -185,13 +185,9 @@ class RPCClient:
             return await self.call("lottocommit", chosen_numbers)
         return await self.call("lottocommit")
 
-    async def lotto_claim(self, commit_hash: str) -> RPCResponse:
-        """로또 결과 확정"""
-        return await self.call("lottoclaim", commit_hash)
-
-    async def lotto_check_result(self, commit_hash: str) -> RPCResponse:
-        """로또 결과 확인"""
-        return await self.call("lottocheckresult", commit_hash)
+    async def lotto_check_result(self, tx_id: str) -> RPCResponse:
+        """로또 결과 확인 (TX ID로 조회)"""
+        return await self.call("lottocheckresult", tx_id)
 
     async def list_lotto_commits(self, address: str = None) -> RPCResponse:
         """대기 중인 커밋 목록"""

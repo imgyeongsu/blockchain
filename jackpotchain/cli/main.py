@@ -179,7 +179,8 @@ def run_node(args):
                     miner_address=args.address,
                     transactions=txs,
                     difficulty_target=difficulty,
-                    height=height
+                    height=height,
+                    blockchain=blockchain
                 )
                 print(f"\n[Miner] Mining block {height}...")
 
@@ -213,6 +214,17 @@ def run_node(args):
                         # Mempool에서 포함된 TX 제거
                         for tx in result.block.transactions[1:]:  # coinbase 제외
                             mempool.remove_tx(tx.get_txid())
+
+                        # Reorg 발생 시 disconnect된 TX를 mempool에 복원
+                        disconnected_txs = blockchain.pop_disconnected_txs()
+                        if disconnected_txs:
+                            restored = 0
+                            for tx in disconnected_txs:
+                                added, _ = mempool.add_tx(tx)
+                                if added:
+                                    restored += 1
+                            print(f"[REORG] {len(disconnected_txs)}개 TX 중 {restored}개 mempool 복원")
+
                         # 네트워크에 브로드캐스트
                         await node.broadcast_block(result.block)
                         print(f"[Miner] Block added and broadcasted. New height: {blockchain.get_height()}")
@@ -250,6 +262,16 @@ def run_node(args):
             # Mempool에서 포함된 TX 제거
             for tx in block.transactions[1:]:  # coinbase 제외
                 mempool.remove_tx(tx.get_txid())
+
+            # Reorg 발생 시 disconnect된 TX를 mempool에 복원
+            disconnected_txs = blockchain.pop_disconnected_txs()
+            if disconnected_txs:
+                restored = 0
+                for tx in disconnected_txs:
+                    added, _ = mempool.add_tx(tx)
+                    if added:
+                        restored += 1
+                print(f"[REORG] {len(disconnected_txs)}개 TX 중 {restored}개 mempool 복원")
         else:
             # 이미 있는 블록이면 무시 (중복 수신)
             if "already exists" not in msg.lower():
@@ -373,7 +395,8 @@ def run_miner(args):
                 miner_address=args.address,
                 transactions=txs,
                 difficulty_target=difficulty,
-                height=height
+                height=height,
+                blockchain=blockchain
             )
 
             print(f"\nMining block {height}...")

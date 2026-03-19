@@ -24,7 +24,7 @@ from ..consensus.chain import Blockchain
 from ..core.block import Block
 from ..core.transaction import Transaction
 from ..mempool.pool import Mempool
-from ..constants import DEFAULT_PORT, DEFAULT_RENDEZVOUS_PORT
+from ..constants import DEFAULT_PORT, DEFAULT_RENDEZVOUS_PORT, MAX_INV_SIZE
 
 # 블록 버퍼/대기열 최대 크기 (메모리 누수 방지)
 MAX_BLOCK_BUFFER_SIZE = 1000
@@ -50,6 +50,7 @@ class NodeConfig:
     rendezvous_port: int = DEFAULT_RENDEZVOUS_PORT  # 8334
     rendezvous_seeds: list = None  # 랑데부 시드 노드 (ip:port)
     is_seed_node: bool = False  # True면 랑데부 서버도 실행
+    allow_private_ip: bool = False  # True면 사설 IP 피어도 캐시 허용 (로컬 테스트용)
 
 
 class Node:
@@ -77,7 +78,7 @@ class Node:
         )
 
         # 피어 발견
-        self.discovery = PeerDiscovery(self.config.data_dir)
+        self.discovery = PeerDiscovery(self.config.data_dir, allow_private_ip=self.config.allow_private_ip)
 
         # NAT 자동 포트 매핑
         self.nat_manager: Optional[NATManager] = None
@@ -111,6 +112,8 @@ class Node:
         self._requesting: set = set()  # 현재 요청 중인 블록 해시
         self._block_buffer: Dict[bytes, Block] = {}  # 순서 대기 중인 블록
         self._batch_size: int = 16  # 동시 요청 블록 수
+        self._sync_start_time: float = 0  # 동기화 세션 시작 시각
+        self._sync_timeout: int = 120  # 동기화 세션 타임아웃 (초)
 
     @property
     def height(self) -> int:
@@ -421,12 +424,14 @@ class Node:
         tx_count = sum(1 for i in inv_msg.items if i.inv_type == InvType.TX)
         print(f"[SYNC] INV 수신: 블록 {block_count}개, TX {tx_count}개 from {address.ip}:{address.port}")
 
-        # TX는 바로 요청
+        # TX는 바로 요청 (MAX_INV_SIZE 제한, 5.7)
         tx_to_fetch = []
         for item in inv_msg.items:
             if item.inv_type == InvType.TX:
                 if self.mempool and not self.mempool.has_tx(item.hash):
                     tx_to_fetch.append(item)
+                    if len(tx_to_fetch) >= MAX_INV_SIZE:
+                        break
 
         if tx_to_fetch:
             getdata = GetDataMessage(items=tx_to_fetch)
@@ -445,14 +450,26 @@ class Node:
                 print(f"[SYNC] 대기열 크기 제한: {len(block_hashes)} -> {MAX_PENDING_BLOCKS}")
                 block_hashes = block_hashes[:MAX_PENDING_BLOCKS]
 
+            # 이전 피어 요청 잔여물 초기화 (5.4)
+            self._requesting.clear()
             self._pending_blocks = block_hashes
             self._sync_peer = address
+            self._sync_start_time = time.time()  # 세션 타임아웃 추적 (5.6)
             print(f"[SYNC] 블록 {len(block_hashes)}개 대기열에 추가, 순차 다운로드 시작")
             await self._request_next_block()
 
     async def _request_next_block(self):
         """대기 중인 다음 블록들 요청 (배치)"""
         if not self._pending_blocks or not self._sync_peer:
+            return
+
+        # 세션 타임아웃 체크 (5.6)
+        if time.time() - self._sync_start_time > self._sync_timeout:
+            print(f"[SYNC] 세션 타임아웃 ({self._sync_timeout}s). 동기화 중단.")
+            self._sync_peer = None
+            self._pending_blocks.clear()
+            self._requesting.clear()
+            self._block_buffer.clear()
             return
 
         # 요청 안 한 것 중 최대 batch_size개 선택
@@ -554,6 +571,7 @@ class Node:
             print(f"[SYNC] 동기화 완료! 현재 높이: {self.height}")
             self._sync_peer = None
             self._block_buffer.clear()
+            self._requesting.clear()  # 요청 잔여물 초기화 (5.5)
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
         """TX 수신"""
