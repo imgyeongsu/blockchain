@@ -88,10 +88,10 @@ class VersionMessage:
     timestamp: int = 0
     addr_recv_services: int = 1
     addr_recv_ip: bytes = b'\x00' * 16
-    addr_recv_port: int = 8333
+    addr_recv_port: int = 9777
     addr_trans_services: int = 1
     addr_trans_ip: bytes = b'\x00' * 16
-    addr_trans_port: int = 8333
+    addr_trans_port: int = 9777
     nonce: int = 0
     user_agent: bytes = b'/JackpotChain:0.1.0/'
     start_height: int = 0
@@ -247,7 +247,7 @@ class NetAddress:
     timestamp: int = 0              # 마지막으로 본 시간
     services: int = 1               # 서비스 플래그
     ip: bytes = b'\x00' * 16        # IPv6 또는 IPv4-mapped (16 bytes)
-    port: int = 8333                # 포트
+    port: int = 9777                # 포트
 
     def serialize(self) -> bytes:
         return (
