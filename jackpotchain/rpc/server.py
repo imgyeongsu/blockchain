@@ -536,6 +536,7 @@ class RPCServer:
                 'version': p.version,
                 'subver': p.user_agent,
                 'startingheight': p.start_height,
+                'best_height': p.best_height,
                 'synced_headers': p.synced_headers,
                 'inbound': p.is_inbound,
             }

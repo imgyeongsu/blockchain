@@ -65,6 +65,6 @@ class NetworkWidget(ScrollableContainer):
 
             for p in peers:
                 addr = p.get("addr", "?")[:25]
-                height = p.get("startingheight", 0)
+                height = p.get("best_height", p.get("startingheight", 0))
                 direction = "IN" if p.get("inbound") else "OUT"
                 table.add_row(addr, f"H:{height}", direction)

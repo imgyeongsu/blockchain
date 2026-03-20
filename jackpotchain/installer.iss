@@ -3,14 +3,14 @@
 
 [Setup]
 AppName=JackpotChain
-AppVersion=1.0.2
+AppVersion=1.0.3
 AppPublisher=JackpotChain Team
 AppComments=Educational blockchain project. Commercial use and private transactions are prohibited.
 AppSupportURL=
 DefaultDirName={autopf}\JackpotChain
 DefaultGroupName=JackpotChain
 OutputDir=installer_output
-OutputBaseFilename=JackpotChain-Setup-1.0.2
+OutputBaseFilename=JackpotChain-Setup-1.0.3
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
