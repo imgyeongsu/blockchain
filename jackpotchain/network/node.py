@@ -192,6 +192,10 @@ class Node:
         for addr in initial_peers:
             self.peer_manager.add_peer_address(addr)
 
+        # 시드 노드에 즉시 연결
+        for addr in initial_peers[:5]:
+            asyncio.create_task(self.connect_to_peer(addr))
+
         # 연결 유지 태스크
         asyncio.create_task(self._maintain_connections())
 
@@ -590,6 +594,11 @@ class Node:
         if self._on_block:
             self._on_block(block, peer)
 
+        # 피어 높이 갱신 (체인 현재 높이로)
+        chain_height = self.blockchain.get_height() if self.blockchain else 0
+        if chain_height > 0:
+            self.peer_manager.update_peer_height(address, chain_height)
+
         # 다른 피어들에게 재전파 (보낸 피어 제외)
         await self._relay_block(block, exclude=address)
 
@@ -867,6 +876,22 @@ class Node:
 
         self.peer_manager.update_peer_state(address, PeerState.DISCONNECTED)
         self.peer_manager.remove_peer(address)
+
+        # 연결이 끊기면 즉시 재연결 시도
+        if self._running and self.peer_manager.can_connect_outbound():
+            asyncio.create_task(self._reconnect_soon())
+
+    async def _reconnect_soon(self):
+        """끊김 후 3초 대기 → 재연결"""
+        await asyncio.sleep(3)
+        if not self._running:
+            return
+        to_connect = self.peer_manager.get_peers_to_connect(1)
+        if not to_connect:
+            connected = set(str(a) for a in self._connections.keys())
+            to_connect = self.discovery.get_peers_to_connect(count=1, exclude=connected)
+        for addr in to_connect:
+            await self.connect_to_peer(addr)
 
     async def _maintain_connections(self):
         """연결 유지"""

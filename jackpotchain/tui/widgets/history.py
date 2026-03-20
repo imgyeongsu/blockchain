@@ -150,15 +150,15 @@ class HistoryWidget(ScrollableContainer):
                 status = c.get("status", "?")
                 blocks_left = c.get("blocks_until_payout", 0)
 
-                if status == "ready":
-                    status_str = "READY"
-                    result_str = ">>> Check!"
-                elif status == "pending":
-                    status_str = f"D-{blocks_left}"
-                    result_str = f"{blocks_left} blocks"
-                elif status == "pending_mine":
+                if status == "pending_mine":
                     status_str = "MINING..."
                     result_str = "--"
+                elif blocks_left <= 0:
+                    status_str = "READY"
+                    result_str = ">>> Check!"
+                elif status in ("pending", "ready"):
+                    status_str = f"D-{blocks_left}"
+                    result_str = f"{blocks_left} blocks"
                 else:
                     status_str = status.upper()[:10]
                     result_str = "--"
