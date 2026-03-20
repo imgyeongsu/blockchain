@@ -6,6 +6,7 @@ Step 9-10: 동기화 관리
 
 import asyncio
 import time
+from collections import deque
 from typing import Optional, List, Set
 from dataclasses import dataclass
 from enum import Enum
@@ -14,7 +15,6 @@ from ..consensus.chain import Blockchain, ChainState
 from ..consensus.difficulty import get_next_difficulty
 from ..core.block import Block, BlockHeader
 from ..network.peer import PeerInfo, PeerManager
-from ..validation.block import validate_block
 from ..constants import MAX_HEADERS_SIZE
 
 
@@ -48,6 +48,9 @@ class SyncManager:
     3. 검증 후 체인에 추가
     """
 
+    # 피어당 최대 동시 요청 블록 수
+    BLOCKS_PER_PEER = 16
+
     def __init__(
         self,
         blockchain: Blockchain,
@@ -59,12 +62,25 @@ class SyncManager:
         # 상태
         self.state = SyncState.IDLE
         self._best_known_height = 0
+        self._num_sync_peers = 1  # 병렬 다운로드에 참여하는 피어 수
 
         # 다운로드 대기열 및 고아 블록 버퍼
-        self._headers_to_fetch: List[bytes] = []
+        self._headers_to_fetch: deque = deque()        # 순서 보장용 (O(1) popleft)
+        self._headers_set: Set[bytes] = set()          # O(1) 멤버십 체크용
         self._blocks_to_fetch: Set[bytes] = set()
         self._downloading: Set[bytes] = set()
-        self._block_buffer: dict[bytes, Block] = {}
+        self._downloading_since: dict[bytes, float] = {}  # hash → 요청 시각
+        self._block_buffer: dict[bytes, tuple] = {}       # hash → (Block, PeerInfo)
+
+        # 재요청 타임아웃 (초): 이 시간 안에 블록 안 오면 재요청
+        self.DOWNLOAD_TIMEOUT = 5
+
+        # drain 전용 asyncio.Event - 새 블록이 버퍼에 들어올 때 signal
+        self._drain_event: asyncio.Event = asyncio.Event()
+        self._drain_task: Optional[asyncio.Task] = None
+
+        # 신뢰하는 sync 피어 주소 (비인가 피어 헤더 주입 방지)
+        self._sync_peer_address = None
 
         # 통계
         self._blocks_downloaded = 0
@@ -96,6 +112,10 @@ class SyncManager:
 
         self.state = SyncState.HEADERS
         self._download_start_time = time.time()
+
+        # drain 전용 태스크 시작 (아직 없으면)
+        if self._drain_task is None or self._drain_task.done():
+            self._drain_task = asyncio.create_task(self._drain_loop())
 
         # 헤더 요청
         await self._request_headers()
@@ -138,6 +158,10 @@ class SyncManager:
         if self.state != SyncState.HEADERS:
             return
 
+        # 비인가 피어 헤더 주입 방지: 신뢰하는 sync 피어만 수락
+        if self._sync_peer_address is not None and address != self._sync_peer_address:
+            return
+
         for header_bytes in headers:
             try:
                 # 1. 수신한 바이트 배열을 BlockHeader 객체로 변환 (역직렬화)
@@ -149,19 +173,19 @@ class SyncManager:
                     continue
 
                 # 3. 작업증명(PoW) 일차적 검증
-                # 악의적인 공격자가 쓰레기 데이터를 보내더라도 PoW를 통과하지 못하면 
+                # 악의적인 공격자가 쓰레기 데이터를 보내더라도 PoW를 통과하지 못하면
                 # 블록 본문을 다운로드하기 전에 즉시 무시하여 대역폭과 디스크 I/O를 절약합니다.
                 if not header.verify_pow():
                     # (실제 환경에서는 여기서 해당 Peer의 신뢰도 점수를 깎습니다)
                     continue
 
-                # 4. 검증 완료된 해시를 다운로드 목록(Set)에 담아 중복 요청을 방지
-                self._blocks_to_fetch.add(header_hash)
-                
-                # 다운로드 순서를 보장하기 위해 List 구조에도 추가로 보관
-                self._headers_to_fetch.append(header_hash)
-                
-            except Exception as e:
+                # 4. 중복 추가 방지 후 다운로드 큐에 등록
+                if header_hash not in self._headers_set:
+                    self._blocks_to_fetch.add(header_hash)
+                    self._headers_to_fetch.append(header_hash)
+                    self._headers_set.add(header_hash)
+
+            except Exception:
                 # 직렬화 형식이 잘못되었거나 파싱 실패 시 무시
                 pass
 
@@ -176,27 +200,37 @@ class SyncManager:
     async def _request_blocks(self):
         """블록 요청"""
         if not self._blocks_to_fetch and not self._downloading:
-            # 블록 동기화 완료
-            self.state = SyncState.SYNCED
-            self.blockchain.state = ChainState.SYNCED
-            self._headers_to_fetch.clear()  # 동기화 완료 시 큐 초기화 (메모리 확보)
+            # 모든 블록 다운로드 완료 - drain loop가 처리 완료 시 SYNCED 설정
             return
 
         if self._request_blocks_callback:
-            # 동시 요청 제한 (순서 보장을 위해 List 순회)
+            # 동시 요청 제한: 피어 수에 비례하여 in-flight 윈도우 확장
+            max_in_flight = self.BLOCKS_PER_PEER * max(1, self._num_sync_peers)
             to_request = []
             for block_hash in self._headers_to_fetch:
                 if block_hash in self._blocks_to_fetch and block_hash not in self._downloading:
                     to_request.append(block_hash)
                     self._downloading.add(block_hash)
-                    if len(to_request) >= 16:
+                    if len(to_request) >= max_in_flight:
                         break
+
+            now = time.time()
+            for bh in to_request:
+                self._downloading_since[bh] = now
 
             if to_request:
                 await self._request_blocks_callback(to_request)
 
     def _process_single_block(self, block: Block, peer: PeerInfo) -> bool:
-        """단일 블록의 체인 유효성 검증 및 추가 시도"""
+        """단일 블록의 체인 유효성 검증 및 추가 시도
+
+        IBD 중에는 경량 검증만 수행 (PoW는 헤더 단계에서 이미 검증됨):
+        - 헤더 검증 (PoW, 타임스탬프, 난이도)
+        - 구조 검증 (Merkle Root, Coinbase 존재)
+        - 트랜잭션 서명 검증은 생략 (Bitcoin Core와 동일한 IBD 최적화)
+        """
+        from ..validation.block import validate_block_header, validate_block_structure
+
         prev_block = self.blockchain.get_tip()
         prev_header = prev_block.header if prev_block else None
         expected_difficulty = get_next_difficulty(
@@ -204,63 +238,121 @@ class SyncManager:
             self.blockchain.get_block_by_height
         )
 
-        result = validate_block(
-            block,
-            self.blockchain.utxo_set,
-            self.blockchain.get_height() + 1,
-            prev_header=prev_header,
-            expected_difficulty=expected_difficulty,
-            blockchain=self.blockchain
+        # 1. 헤더 검증 (PoW + 타임스탬프 + 난이도)
+        header_result = validate_block_header(
+            block.header, prev_header, expected_difficulty
         )
-
-        if result.is_valid:
-            success, _ = self.blockchain.add_block(block)
-            return success
-        else:
+        if not header_result.is_valid:
+            block_hash = block.get_hash().hex()[:16]
+            height = self.blockchain.get_height() + 1
+            print(f"[SYNC] 헤더 검증 실패: height={height}, hash={block_hash}...")
+            print(f"[SYNC]   error={header_result.error}, message={header_result.message}")
+            print(f"[SYNC]   block.difficulty={block.header.difficulty_target:#x}, expected={expected_difficulty:#x}")
+            print(f"[SYNC]   block.timestamp={block.header.timestamp}, prev.timestamp={prev_header.timestamp if prev_header else 'N/A'}")
             self.peer_manager.add_ban_score(peer.address, 20)
             return False
 
+        # 2. 구조 검증 (Merkle Root, Coinbase 존재 등)
+        struct_result = validate_block_structure(block)
+        if not struct_result.is_valid:
+            block_hash = block.get_hash().hex()[:16]
+            height = self.blockchain.get_height() + 1
+            print(f"[SYNC] 구조 검증 실패: height={height}, hash={block_hash}...")
+            print(f"[SYNC]   error={struct_result.error}, message={struct_result.message}")
+            self.peer_manager.add_ban_score(peer.address, 20)
+            return False
+
+        # 3. 체인에 추가 (add_block이 prev_hash 연결성 + UTXO 적용 처리)
+        success, msg = self.blockchain.add_block(block)
+        if not success:
+            tip = self.blockchain.get_tip()
+            tip_hash = tip.get_hash() if tip else b''
+            prev_hash = block.header.prev_block_hash
+            print(f"[SYNC] add_block 실패: {msg}")
+            print(f"[SYNC]   block_hash  = {block.get_hash().hex()[:16]}...")
+            print(f"[SYNC]   prev_hash   = {prev_hash.hex()[:16]}...")
+            print(f"[SYNC]   current_tip = {tip_hash.hex()[:16]}... (height={self.blockchain.get_height()})")
+            print(f"[SYNC]   prev==tip?  = {prev_hash == tip_hash}")
+            print(f"[SYNC]   prev in idx?= {prev_hash in self.blockchain._block_index}")
+            print(f"[SYNC]   prev in blk?= {prev_hash in self.blockchain._blocks}")
+        return success
+
     async def on_block_received(self, block: Block, peer: PeerInfo):
-        """블록 수신 (Orphan Buffer를 통한 순차 조립 보장)"""
+        """블록 수신 - 버퍼에 보관 후 drain task에 알림"""
         block_hash = block.get_hash()
 
         # 다운로드 목록에서 제거
         self._downloading.discard(block_hash)
+        self._downloading_since.pop(block_hash, None)
         self._blocks_to_fetch.discard(block_hash)
 
-        # IBD 관할 내의 블록이라면 먼저 버퍼에 임시 보관
-        if block_hash in self._headers_to_fetch:
-            self._block_buffer[block_hash] = block
-            print(f"[BUFFER] 블록 도착 (순서 대기 중 - 버퍼 보관): {block_hash.hex()[:8]}...")
+        if block_hash in self._headers_set:
+            self._block_buffer[block_hash] = (block, peer)
+            self._drain_event.set()   # drain task 깨우기
         else:
-            # 외부 실시간 전파 블록이면 즉각 검증
+            # 외부 실시간 전파 블록
             self._process_single_block(block, peer)
-            return
 
-        # 버퍼에 쌓인 블록들을 정해진 헤더 순서대로 샅샅이 빼내어(Drain) 조립
-        blocks_added = 0
-        while self._headers_to_fetch:
-            expected_hash = self._headers_to_fetch[0]  # 차례대로 내려가야 할 다음 해시
-            if expected_hash in self._block_buffer:
-                # 다음 번 순서에 맞는 블록이 버퍼에 이미 도착해있다면 꺼낸다
-                next_block = self._block_buffer.pop(expected_hash)
-                print(f"[BUFFER] 🧩 순서 일치! 버퍼에서 꺼내어 조립 (Drain): {expected_hash.hex()[:8]}...")
-                
-                success = self._process_single_block(next_block, peer)
-                if success:
-                    self._blocks_downloaded += 1
-                    self._headers_to_fetch.pop(0)  # 성공적으로 조립되었으므로 큐에서 제거
-                    blocks_added += 1
-                else:
-                    # 검증 실패 시 동기화 진행 중단 (실제론 노드 교체 등 예외 처리 필요)
-                    break 
-            else:
-                # 다음 차례 블록이 아직 네트워크에서 안 오고 대기 중임
-                break
+    async def _drain_loop(self):
+        """독립 태스크: 버퍼에서 블록을 순서대로 꺼내 체인에 조립
+        event loop를 블록킹하지 않도록 블록마다 await"""
+        try:
+            while self.state in (SyncState.HEADERS, SyncState.BLOCKS):
+                # 새 블록이 버퍼에 들어올 때까지 대기
+                await self._drain_event.wait()
+                self._drain_event.clear()
 
-        # 추가 블록 요청 (큐에 자리가 났을 때)
-        if self.state == SyncState.BLOCKS and blocks_added > 0:
-            await self._request_blocks()
+                # 순서대로 drain
+                while self._headers_to_fetch:
+                    expected_hash = self._headers_to_fetch[0]
+
+                    if expected_hash not in self._block_buffer:
+                        break   # 아직 다음 블록 미도착
+
+                    next_block, peer = self._block_buffer.pop(expected_hash)
+
+                    try:
+                        success = self._process_single_block(next_block, peer)
+                    except Exception as e:
+                        import traceback
+                        print(f"[SYNC] ★ _process_single_block 예외 발생!")
+                        print(f"[SYNC]   height={self.blockchain.get_height() + 1}, hash={expected_hash.hex()[:16]}...")
+                        print(f"[SYNC]   exception: {type(e).__name__}: {e}")
+                        traceback.print_exc()
+                        success = False
+
+                    if success:
+                        self._blocks_downloaded += 1
+                        self._headers_to_fetch.popleft()
+                        self._headers_set.discard(expected_hash)
+                        if self._blocks_downloaded % 100 == 0 or self._blocks_downloaded <= 5:
+                            print(f"[SYNC] 블록 #{self._blocks_downloaded} 추가 완료: height={self.blockchain.get_height()}, hash={expected_hash.hex()[:12]}...")
+                        # 모든 블록 처리 완료
+                        if not self._headers_to_fetch:
+                            self.state = SyncState.SYNCED
+                            self.blockchain.state = ChainState.SYNCED
+                            return
+                        # 슬롯이 비었으니 추가 요청
+                        await self._request_blocks()
+                    else:
+                        self._headers_to_fetch.popleft()
+                        self._headers_set.discard(expected_hash)
+                        self.state = SyncState.IDLE
+                        print(f"[SYNC] 블록 검증 실패 - sync 초기화: {expected_hash.hex()[:8]}...")
+                        return
+
+                    # 블록마다 event loop에 제어 반환 (다른 코루틴이 메시지를 받을 수 있게)
+                    await asyncio.sleep(0)
+
+            print("[SYNC] drain loop 종료")
+        except asyncio.CancelledError:
+            print("[SYNC] drain loop 취소됨")
+        except Exception as e:
+            import traceback
+            print(f"[SYNC] ★★★ drain loop 예외로 죽음! ★★★")
+            print(f"[SYNC]   exception: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            self.state = SyncState.IDLE
 
     def get_stats(self) -> SyncStats:
         """동기화 통계"""
@@ -279,6 +371,47 @@ class SyncManager:
             blocks_per_second=bps,
             eta_seconds=eta
         )
+
+    async def check_stalled_downloads(self):
+        """타임아웃된 in-flight 블록을 _downloading에서 해제하여 재요청 가능하게 함"""
+        if self.state != SyncState.BLOCKS:
+            return
+
+        now = time.time()
+        timed_out = [
+            bh for bh, t in self._downloading_since.items()
+            if now - t > self.DOWNLOAD_TIMEOUT
+        ]
+
+        if not timed_out:
+            return
+
+        print(f"[SYNC] 타임아웃 블록 {len(timed_out)}개 재요청 큐로 반환")
+        for bh in timed_out:
+            self._downloading.discard(bh)
+            self._downloading_since.pop(bh, None)
+            # _blocks_to_fetch에 다시 넣어 재요청 대상으로 만듦
+            if bh in self._headers_set:
+                self._blocks_to_fetch.add(bh)
+
+        await self._request_blocks()
+
+    def reset_sync(self):
+        """동기화 상태 초기화 (sync 피어 연결 끊김 등 예외 상황 시 호출)"""
+        self.state = SyncState.IDLE
+        self._sync_peer_address = None
+        self._headers_to_fetch.clear()
+        self._headers_set.clear()
+        self._blocks_to_fetch.clear()
+        self._downloading.clear()
+        self._downloading_since.clear()
+        self._block_buffer.clear()
+        self._blocks_downloaded = 0
+        self._download_start_time = 0
+        if self._drain_task and not self._drain_task.done():
+            self._drain_task.cancel()
+        self._drain_task = None
+        self._drain_event.clear()
 
     def is_synced(self) -> bool:
         """동기화 완료 여부"""

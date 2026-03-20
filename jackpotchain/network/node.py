@@ -102,8 +102,9 @@ class Node:
         # GETADDR 요청 시간 추적 (스팸 방지)
         self._last_getaddr: Dict[PeerAddress, float] = {}
 
-        # 네트워크 전역 동기화 피어 대상자 (SyncManager 연동)
-        self._sync_peer: Optional[PeerAddress] = None
+        # 동기화 피어 관리
+        self._sync_peer: Optional[PeerAddress] = None   # 헤더 소스 (단일)
+        self._sync_peers: set = set()                    # 블록 다운로드 소스 (다중)
 
         # Headers-First SyncManager 엔진 통합 (단일 소스)
         self.sync_manager = SyncManager(self.blockchain, self.peer_manager)
@@ -177,11 +178,17 @@ class Node:
         for addr in initial_peers:
             self.peer_manager.add_peer_address(addr)
 
+        # 시드 노드 즉시 연결 (max_outbound 한도 내에서 전부)
+        asyncio.create_task(self._connect_seeds())
+
         # 연결 유지 태스크
         asyncio.create_task(self._maintain_connections())
 
         # 피어 발견 태스크
         asyncio.create_task(self._discovery_loop())
+
+        # 다운로드 stall 감지 태스크
+        asyncio.create_task(self._stall_check_loop())
 
     async def stop(self):
         """노드 정지"""
@@ -393,10 +400,9 @@ class Node:
         # 피어에게 주소 요청
         await self._send_getaddr(address)
 
-        # 동기화 체크 (아웃바운드는 VERSION 수신 후에 체크)
+        # 동기화 체크: 인바운드/아웃바운드 모두 VERACK 이후 피어 height 확인
         peer = self.peer_manager.get_peer(address)
-        if peer and peer.is_inbound:
-            # 인바운드면 VERACK 받은 후 동기화 체크
+        if peer:
             await self._check_sync(address)
 
     async def _check_sync(self, address: PeerAddress):
@@ -404,13 +410,23 @@ class Node:
         peer = self.peer_manager.get_peer(address)
         if peer and peer.start_height > self.height:
             if self.sync_manager.state in (SyncState.IDLE, SyncState.SYNCED):
+                # 새 IBD 시작
                 self._sync_peer = address
+                self._sync_peers = {address}
+                self.sync_manager._sync_peer_address = address  # 헤더 주입 방지용
+                self.sync_manager._num_sync_peers = 1
                 print(f"[SYNC] Headers-First IBD 시작: 로컬={self.height}, 피어={peer.start_height}, 주소={address.ip}:{address.port}")
                 self.sync_manager.update_peer_height(peer, peer.start_height)
                 await self.sync_manager.start_sync()
             else:
-                # 이미 IBD 진행 중일 때는 엔진 초기화를 피하고 높이 갱신만 수행
+                # IBD 진행 중: 새 피어를 블록 다운로드 소스로 추가
+                self._sync_peers.add(address)
+                self.sync_manager._num_sync_peers = len(self._sync_peers)
                 self.sync_manager.update_peer_height(peer, peer.start_height)
+                print(f"[SYNC] 블록 다운로드 피어 추가: {address.ip}:{address.port} (총 {len(self._sync_peers)}개)")
+                # BLOCKS 단계면 새 피어 합류 시 추가 블록 요청 트리거
+                if self.sync_manager.state == SyncState.BLOCKS:
+                    await self.sync_manager._request_blocks()
         else:
             print(f"[SYNC] 동기화 불필요: 로컬={self.height}, 피어={peer.start_height if peer else 'N/A'}")
 
@@ -479,8 +495,8 @@ class Node:
         peer = self.peer_manager.get_peer(address)
         block_hash = block.get_hash()
 
-        # 1. SyncManager 동기화 중(IBD)인 블록이라면 엔진 파이프라인으로 넘기고 종료
-        if block_hash in self.sync_manager._downloading:
+        # 1. IBD 관할 블록이면 엔진 파이프라인으로 전달 (어떤 피어에서 왔든 상관없음)
+        if self.sync_manager.state == SyncState.BLOCKS and block_hash in self.sync_manager._headers_set:
             await self.sync_manager.on_block_received(block, peer)
             return
 
@@ -491,6 +507,9 @@ class Node:
             print(f"[SYNC] 이전 블록 없음 (실시간 수신), 동기화 재개 (prev={prev_hash.hex()[:16]}...)")
             if self.sync_manager.state in (SyncState.IDLE, SyncState.SYNCED):
                 self._sync_peer = address
+                self._sync_peers = {address}
+                self.sync_manager._sync_peer_address = address  # 헤더 주입 방지
+                self.sync_manager._num_sync_peers = 1
                 self.sync_manager.update_peer_height(peer, self.blockchain.get_height() + 1)
                 await self.sync_manager.start_sync()
             return
@@ -560,17 +579,24 @@ class Node:
                 start_height = index.height + 1
                 break
 
-        # 2. 헤더 수집 (최대 2000개)
+        # 2. 헤더 수집 (최대 2000개, 연결성 검증 포함)
         headers = []
         current_height = self.blockchain.get_height()
         hash_stop = msg.hash_stop
+        prev_sent_hash = None
 
         for height in range(start_height, min(start_height + 2000, current_height + 1)):
             block = self.blockchain.get_block_by_height(height)
             if not block:
                 break
 
+            # 연결성 검증: 이전 블록과 연결되지 않으면 전송 중단
+            if prev_sent_hash is not None and block.header.prev_block_hash != prev_sent_hash:
+                print(f"[SYNC] GETHEADERS: height={height}에서 체인 연결 끊김, 전송 중단 ({len(headers)}개)")
+                break
+
             headers.append(block.header.serialize())
+            prev_sent_hash = block.get_hash()
 
             # hash_stop 도달 시 중단
             if hash_stop != bytes(32) and block.get_hash() == hash_stop:
@@ -678,13 +704,26 @@ class Node:
             await self._send_message(self._sync_peer, MessageType.GETHEADERS, msg.serialize())
 
     async def _on_sync_request_blocks(self, block_hashes: List[bytes]):
-        """SyncManager에서 헤더 검증 후 본문을 요청할 때 트리거되는 콜백"""
-        if self._sync_peer:
-            # 수집된 정상 해시값들로 GETDATA 메시지를 조립하여 전송합니다.
-            items = [InvItem(InvType.BLOCK, h) for h in block_hashes]
+        """SyncManager에서 헤더 검증 후 본문을 요청할 때 트리거되는 콜백 (다중 피어 라운드-로빈)"""
+        # 연결이 살아있는 sync 피어만 필터
+        active_peers = [p for p in self._sync_peers if p in self._connections]
+        if not active_peers:
+            return
+
+        # 피어별로 해시 분배 (라운드-로빈)
+        per_peer: dict = {}
+        for i, block_hash in enumerate(block_hashes):
+            target = active_peers[i % len(active_peers)]
+            per_peer.setdefault(target, []).append(block_hash)
+
+        # 피어별 GETDATA 전송
+        for peer_addr, hashes in per_peer.items():
+            items = [InvItem(InvType.BLOCK, h) for h in hashes]
             msg = GetDataMessage(items=items)
-            print(f"[SYNC] Headers-First 진행 중: GETDATA 전송 (본문 {len(items)}개 동시 요청)")
-            await self._send_message(self._sync_peer, MessageType.GETDATA, msg.serialize())
+            await self._send_message(peer_addr, MessageType.GETDATA, msg.serialize())
+
+        peer_summary = ", ".join(f"{a.ip}:{a.port}({len(h)}개)" for a, h in per_peer.items())
+        print(f"[SYNC] 병렬 블록 요청: 총 {len(block_hashes)}개 → {peer_summary}")
 
     async def _send_version(self, address: PeerAddress):
         """VERSION 전송"""
@@ -730,6 +769,31 @@ class Node:
         self.peer_manager.update_peer_state(address, PeerState.DISCONNECTED)
         self.peer_manager.remove_peer(address)
 
+        # sync 피어 관리
+        self._sync_peers.discard(address)
+        self.sync_manager._num_sync_peers = max(1, len(self._sync_peers))
+
+        if address == self._sync_peer:
+            self._sync_peer = None
+            if self.sync_manager.state == SyncState.HEADERS:
+                # 헤더 소스 유실 → IBD 전면 초기화
+                print(f"[SYNC] 헤더 sync 피어 연결 끊김 - IBD 초기화: {address.ip}:{address.port}")
+                self.sync_manager.reset_sync()
+                self._sync_peers.clear()
+                return
+
+        if self.sync_manager.state == SyncState.BLOCKS and not self._sync_peers:
+            # 모든 블록 다운로드 피어 유실 → IBD 초기화
+            print(f"[SYNC] 모든 sync 피어 연결 끊김 - IBD 초기화")
+            self.sync_manager.reset_sync()
+
+    async def _connect_seeds(self):
+        """시작 시 시드 노드에 일괄 연결"""
+        seeds = self.peer_manager._seed_nodes[:]
+        for addr in seeds:
+            if self.peer_manager.can_connect_outbound():
+                await self.connect_to_peer(addr)
+
     async def _maintain_connections(self):
         """연결 유지"""
         while self._running:
@@ -750,6 +814,15 @@ class Node:
                     await self.connect_to_peer(addr)
 
             await asyncio.sleep(30)
+
+    async def _stall_check_loop(self):
+        """주기적으로 타임아웃된 in-flight 블록을 감지하여 재요청"""
+        while self._running:
+            await asyncio.sleep(self.sync_manager.DOWNLOAD_TIMEOUT)
+            try:
+                await self.sync_manager.check_stalled_downloads()
+            except Exception:
+                pass
 
     async def _discovery_loop(self):
         """주기적 피어 발견"""

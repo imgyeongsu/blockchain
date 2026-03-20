@@ -71,6 +71,12 @@ class BlockStore:
             os.fsync(f.fileno())  # 디스크에 확실히 기록
 
         # 원자적 교체 (크래시 시에도 안전)
+        # Windows에서는 대상 파일이 열려있으면 PermissionError 발생 → 먼저 삭제
+        if os.name == 'nt' and index_file.exists():
+            try:
+                index_file.unlink()
+            except PermissionError:
+                pass
         os.replace(temp_file, index_file)
 
     def _block_path(self, block_hash: bytes) -> Path:

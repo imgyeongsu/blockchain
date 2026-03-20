@@ -23,7 +23,7 @@ DEFAULT_RPC_PORT = 8332
 # =============================================================================
 # 블록 파라미터
 # =============================================================================
-BLOCK_TIME_TARGET = 30           # 목표 블록 간격 (초)
+BLOCK_TIME_TARGET = 1           # 목표 블록 간격 (초)
 DIFFICULTY_ADJUSTMENT_INTERVAL = 50  # 난이도 조절 주기 (블록)
 MAX_BLOCK_SIZE = 1_000_000       # 최대 블록 크기 (1 MB)
 MAX_BLOCK_WEIGHT = 4_000_000     # SegWit 가중치 (미사용)
@@ -138,7 +138,8 @@ SEQUENCE_LOCKTIME_DISABLE = 0xFFFFFFFF
 # =============================================================================
 MAX_FUTURE_BLOCK_TIME = 2 * 60 * 60  # 블록 타임스탬프 최대 미래 허용 (2시간)
 MAX_BLOCK_TIME_DRIFT = MAX_FUTURE_BLOCK_TIME  # 별칭
-TARGET_BLOCK_TIME = BLOCK_TIME_TARGET  # 별칭
+TARGET_BLOCKK_TIME = BLOCK_TIME_TARGET  # 별칭 (오타 유지, 호환성)
+TARGET_BLOCK_TIME = BLOCK_TIME_TARGET   # 별칭
 
 # =============================================================================
 # 난이도 관련

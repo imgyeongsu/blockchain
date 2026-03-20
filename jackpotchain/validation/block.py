@@ -83,13 +83,9 @@ def validate_block_header(
             message=f"Block timestamp too far in future"
         )
 
-    # 이전 블록보다 이후여야 함
-    if prev_header and header.timestamp <= prev_header.timestamp:
-        return BlockValidationResult(
-            is_valid=False,
-            error=BlockValidationError.INVALID_TIMESTAMP,
-            message="Block timestamp must be greater than previous"
-        )
+    # NOTE: 이전 블록과의 타임스탬프 순서 검증은 하지 않음.
+    # Bitcoin과 동일하게, reorg 후 타임스탬프가 역전될 수 있으며
+    # 이는 정상 동작임. 미래 시간 제한(2시간)만으로 충분.
 
     # 난이도 검증
     if expected_difficulty is not None and header.difficulty_target != expected_difficulty:

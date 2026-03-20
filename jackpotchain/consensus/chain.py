@@ -122,15 +122,15 @@ class Blockchain:
                 block = self._store.load_block_by_height(height)
                 if block:
                     if height == 0:
+                        # _add_genesis → _connect_block 에서 UTXO 적용 + commit 인덱싱 처리
                         self._add_genesis(block)
                     else:
                         self._add_block_internal(block, height)
-
-                    # UTXO 업데이트 + Commit 인덱싱
-                    block_hash = block.get_hash()
-                    for tx in block.transactions:
-                        self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
-                        self._index_commit_tx(tx, height, block_hash)
+                        # 비-제네시스 블록: UTXO 적용 + Commit 인덱싱
+                        block_hash = block.get_hash()
+                        for tx in block.transactions:
+                            self.utxo_set.apply_transaction(tx, height, get_address_from_script_pubkey)
+                            self._index_commit_tx(tx, height, block_hash)
 
             print(f"[Chain] Loaded {tip_height + 1} blocks. Height: {self.get_height()}")
 
@@ -340,11 +340,14 @@ class Blockchain:
         for block_hash in blocks_to_disconnect:
             self._disconnect_block(block_hash)
 
-        # 2. 새 블록들 연결하기
+        # 2. 새 블록들 연결하기 + 디스크 저장
+        # reorg로 메인체인이 된 블록들은 사이드체인 시절에 저장되지 않았을 수 있으므로 여기서 저장
         for block_hash in blocks_to_connect:
             block = self._blocks[block_hash]
             height = self._block_index[block_hash].height
             self._connect_block(block, height)
+            if self._store:
+                self._store.save_block(block, height)
 
         self.state = ChainState.SYNCED
 
