@@ -64,6 +64,7 @@ def main():
     tui_parser = subparsers.add_parser('tui', help='Launch Terminal UI')
     tui_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC host')
     tui_parser.add_argument('--rpc-port', type=int, default=9776, help='RPC port')
+    tui_parser.add_argument('--simple', action='store_true', help='Launch simple mode')
 
     args = parser.parse_args()
 
@@ -74,10 +75,13 @@ def main():
     elif args.command == 'mine':
         run_miner(args)
     elif args.command == 'tui':
-        run_tui(args)
+        if getattr(args, 'simple', False):
+            run_simple_tui(args)
+        else:
+            run_tui(args)
     else:
-        # 인자 없이 실행하면 TUI 시작
-        run_tui_default()
+        # 인자 없이 실행하면 Simple TUI 시작
+        run_simple_default()
 
 
 def run_node(args):
@@ -365,6 +369,18 @@ def run_tui_default():
     """TUI 기본 실행 (127.0.0.1:9776)"""
     from jackpotchain.tui.app import run_tui as start_tui
     start_tui()
+
+
+def run_simple_tui(args):
+    """Simple TUI 실행 (RPC 옵션 지정)"""
+    from jackpotchain.tui.simple import run_simple
+    run_simple(host=args.rpc_host, port=args.rpc_port)
+
+
+def run_simple_default():
+    """Simple TUI 기본 실행 (127.0.0.1:9776)"""
+    from jackpotchain.tui.simple import run_simple
+    run_simple()
 
 
 def run_miner(args):
