@@ -28,14 +28,14 @@ logger = logging.getLogger(__name__)
 
 # DNS 시드 (실제 운영 시 도메인 등록 필요)
 DNS_SEEDS = [
-    "seed1.ssatto777.site",
-    "seed2.ssatto777.site",
-    "seed3.ssatto777.site",
+    "seed1.jackpotchain.io",
+    "seed2.jackpotchain.io",
+    "seed3.jackpotchain.io",
 ]
 
 # 하드코딩된 시드 노드 (DNS 실패 시 fallback)
 HARDCODED_SEEDS = [
-    ("54.116.13.57", 9777),  # AWS 시드 노드
+    ("54.116.13.57", 9333),  # AWS 시드 노드
     ("127.0.0.1", DEFAULT_PORT),  # 로컬 테스트용
 ]
 

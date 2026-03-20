@@ -114,7 +114,7 @@ async def run():
 
 **증상**
 ```bash
-curl -d '{"method":"getbalance","params":["X4Nqvw2Y..."],"id":1}' http://127.0.0.1:9779
+curl -d '{"method":"getbalance","params":["X4Nqvw2Y..."],"id":1}' http://127.0.0.1:9335
 # {"result": 0.0}
 ```
 300+ 블록 채굴했는데 모든 주소 잔액이 0.
@@ -232,16 +232,16 @@ Node1과 Node2가 같은 높이에서 다른 블록 해시를 가짐.
 **해결**
 1. 피어 연결 확인:
 ```bash
-curl -d '{"method":"getpeerinfo","params":[],"id":1}' http://127.0.0.1:9779
+curl -d '{"method":"getpeerinfo","params":[],"id":1}' http://127.0.0.1:9335
 ```
 
 2. Node2를 Node1에 연결:
 ```bash
 python -m jackpotchain.cli.main node \
   --mine --address <주소2> \
-  --port 9780 --rpc-port 9781 \
+  --port 9336 --rpc-port 9337 \
   --data-dir ./data2 \
-  --seed 127.0.0.1:9778  # Node1에 연결
+  --seed 127.0.0.1:9334  # Node1에 연결
 ```
 
 3. 제네시스 블록 확인 (하드코딩됨):
@@ -268,7 +268,7 @@ nat_result = await self.nat_manager.setup_port_mapping()
 ```
 
 2. 수동 포트포워딩:
-   - 공유기 설정에서 P2P 포트 (9777 또는 9777) 열기
+   - 공유기 설정에서 P2P 포트 (8333 또는 9333) 열기
 
 3. 아웃바운드 전용 모드:
    - 인바운드 연결 없이도 블록 동기화는 가능
@@ -281,7 +281,7 @@ nat_result = await self.nat_manager.setup_port_mapping()
 
 **증상**
 ```bash
-curl -d '{"method":"sendtoaddress","params":["주소", 100],"id":1}' http://127.0.0.1:9776
+curl -d '{"method":"sendtoaddress","params":["주소", 100],"id":1}' http://127.0.0.1:8332
 # {"error": {"message": "Invalid TX: Input 0 signature verification failed"}}
 ```
 
@@ -332,20 +332,20 @@ logging.basicConfig(level=logging.DEBUG)
 ### RPC로 상태 확인
 ```bash
 # 블록체인 정보
-curl -d '{"method":"getblockchaininfo","params":[],"id":1}' http://127.0.0.1:9779
+curl -d '{"method":"getblockchaininfo","params":[],"id":1}' http://127.0.0.1:9335
 
 # 피어 정보
-curl -d '{"method":"getpeerinfo","params":[],"id":1}' http://127.0.0.1:9779
+curl -d '{"method":"getpeerinfo","params":[],"id":1}' http://127.0.0.1:9335
 
 # 특정 높이 블록 해시
-curl -d '{"method":"getblockhash","params":[100],"id":1}' http://127.0.0.1:9779
+curl -d '{"method":"getblockhash","params":[100],"id":1}' http://127.0.0.1:9335
 ```
 
 ### 데이터 초기화
 ```bash
 # 블록체인 데이터 삭제 후 재동기화
 rm -rf ./data/blocks ./data/utxo
-python -m jackpotchain.cli.main node --seed 54.116.13.57:9777
+python -m jackpotchain.cli.main node --seed 54.116.13.57:9333
 ```
 
 ---

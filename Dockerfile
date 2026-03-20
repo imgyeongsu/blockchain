@@ -28,8 +28,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 # Default ports
-# P2P: 9777, RPC: 9776
-EXPOSE 9777 9776
+# P2P: 8333, RPC: 8332
+EXPOSE 8333 8332
 
 # Volume for persistent data
 VOLUME ["/app/data", "/app/wallet"]
@@ -37,4 +37,4 @@ VOLUME ["/app/data", "/app/wallet"]
 # Default command (node only, no mining)
 # Override with --mine --address for mining node
 ENTRYPOINT ["python", "-m", "jackpotchain.cli.main"]
-CMD ["node", "--port", "9777", "--rpc-port", "9776", "--data-dir", "/app/data"]
+CMD ["node", "--port", "8333", "--rpc-port", "8332", "--data-dir", "/app/data"]

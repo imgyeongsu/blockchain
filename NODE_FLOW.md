@@ -3,7 +3,7 @@
 ## 실행 명령어
 
 ```bash
-python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./data --mine --address <주소>
+python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./data --mine --address <주소>
 ```
 
 ---
@@ -84,7 +84,7 @@ python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./da
 │        │          ├─ DNS 시드 조회                                          │
 │        │          └─ 하드코딩 시드 추가                                     │
 │        │                                                                    │
-│        ├─ (3) TCP 서버 시작 (포트 9777)                                     │
+│        ├─ (3) TCP 서버 시작 (포트 8333)                                     │
 │        │      └─ asyncio.start_server(_handle_inbound)                      │
 │        │                                                                    │
 │        ├─ (4) 연결 유지 태스크                                              │
@@ -94,7 +94,7 @@ python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./da
 │               └─ _discovery_loop()                                          │
 │                                                                             │
 │     await rpc.start()                                                       │
-│        └─ HTTP 서버 시작 (포트 9776)                                        │
+│        └─ HTTP 서버 시작 (포트 8332)                                        │
 └───────────────────────────────────┬─────────────────────────────────────────┘
                                     │
                                     ▼
@@ -235,5 +235,5 @@ python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./da
 
 | 포트 | 프로토콜 | 용도 |
 |------|---------|------|
-| 9777 | TCP | P2P 통신 |
-| 9776 | HTTP | JSON-RPC API |
+| 8333 | TCP | P2P 통신 |
+| 8332 | HTTP | JSON-RPC API |

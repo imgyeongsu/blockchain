@@ -50,15 +50,15 @@ python -m jackpotchain.cli.main node --mine --address WqUDneonGfCqgxqg28oKdUR5Z9
 ### 노드만 실행 (채굴 없음)
 
 ```bash
-python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./data
+python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./data
 ```
 
 ### 옵션
 
 | 옵션 | 설명 | 기본값 |
 |------|------|--------|
-| `--port` | P2P 포트 | 9777 |
-| `--rpc-port` | RPC 포트 | 9776 |
+| `--port` | P2P 포트 | 8333 |
+| `--rpc-port` | RPC 포트 | 8332 |
 | `--data-dir` | 데이터 저장 경로 | ./data |
 | `--mine` | 채굴 활성화 | - |
 | `--address` | 채굴 보상 주소 | - |
@@ -83,60 +83,60 @@ python -m jackpotchain.cli.main wallet balance
 
 ## RPC API
 
-노드 실행 중 `http://127.0.0.1:9776`로 JSON-RPC 호출
+노드 실행 중 `http://127.0.0.1:8332`로 JSON-RPC 호출
 
 ### 블록체인 정보
 
 ```bash
 # 체인 정보
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getblockchaininfo","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getblockchaininfo","params":[],"id":1}'
 
 # 블록 조회
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getblock","params":["<blockhash>"],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getblock","params":["<blockhash>"],"id":1}'
 
 # 높이로 블록해시 조회
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getblockhash","params":[0],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getblockhash","params":[0],"id":1}'
 ```
 
 ### 지갑
 
 ```bash
 # 잔액 조회
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getbalance","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getbalance","params":[],"id":1}'
 
 # UTXO 목록
-curl -X POST http://127.0.0.1:9776 -d '{"method":"listunspent","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"listunspent","params":[],"id":1}'
 
 # 새 주소 생성
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getnewaddress","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getnewaddress","params":[],"id":1}'
 
 # 송금
-curl -X POST http://127.0.0.1:9776 -d '{"method":"sendtoaddress","params":["<address>", 10.0],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"sendtoaddress","params":["<address>", 10.0],"id":1}'
 ```
 
 ### 가챠 시스템
 
 ```bash
 # 가챠 정보
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getgachainfo","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getgachainfo","params":[],"id":1}'
 
 # 잭팟 풀 현황
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getjackpotpool","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getjackpotpool","params":[],"id":1}'
 
 # 가챠 타입 목록
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getgachatypes","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getgachatypes","params":[],"id":1}'
 
 # 가챠 참여 (Commit) - target: 0-99 슬롯 선택
-curl -X POST http://127.0.0.1:9776 -d '{"method":"gachacommit","params":[42],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachacommit","params":[42],"id":1}'
 
 # 가챠 참여 (target 랜덤, 고위험 타입)
-curl -X POST http://127.0.0.1:9776 -d '{"method":"gachacommit","params":[null, "high_risk"],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachacommit","params":[null, "high_risk"],"id":1}'
 
 # 대기 중인 Commit 목록
-curl -X POST http://127.0.0.1:9776 -d '{"method":"listgachacommits","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"listgachacommits","params":[],"id":1}'
 
 # 결과 공개 (Reveal) - 2블록 이상 대기 후
-curl -X POST http://127.0.0.1:9776 -d '{"method":"gachareveal","params":["<commit_hash>"],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"gachareveal","params":["<commit_hash>"],"id":1}'
 ```
 
 **가챠 플로우:**
@@ -150,16 +150,16 @@ curl -X POST http://127.0.0.1:9776 -d '{"method":"gachareveal","params":["<commi
 
 ```bash
 # 피어 정보
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getpeerinfo","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getpeerinfo","params":[],"id":1}'
 
 # 멤풀 상태
-curl -X POST http://127.0.0.1:9776 -d '{"method":"getmempoolinfo","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"getmempoolinfo","params":[],"id":1}'
 ```
 
 ### 전체 명령어
 
 ```bash
-curl -X POST http://127.0.0.1:9776 -d '{"method":"help","params":[],"id":1}'
+curl -X POST http://127.0.0.1:8332 -d '{"method":"help","params":[],"id":1}'
 ```
 
 ---

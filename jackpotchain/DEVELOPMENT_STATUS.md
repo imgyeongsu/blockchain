@@ -98,10 +98,10 @@ pip install -r requirements.txt
 python -m jackpotchain.cli.main --help
 
 # 노드 실행 (채굴 없음)
-python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776
+python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332
 
 # 노드 + 채굴 통합 실행 (권장)
-python -m jackpotchain.cli.main node --mine --address <주소> --port 9777 --rpc-port 9776
+python -m jackpotchain.cli.main node --mine --address <주소> --port 8333 --rpc-port 8332
 
 # 지갑 생성
 python -m jackpotchain.cli.main wallet create
@@ -114,11 +114,11 @@ python -m jackpotchain.cli.main node --mine --address <주소> --data-dir ./myda
 
 ```bash
 # 블록체인 정보
-curl -X POST http://127.0.0.1:9776 \
+curl -X POST http://127.0.0.1:8332 \
   -d '{"method":"getblockchaininfo","params":[],"id":1}'
 
 # 사용 가능한 명령어
-curl -X POST http://127.0.0.1:9776 \
+curl -X POST http://127.0.0.1:8332 \
   -d '{"method":"help","params":[],"id":1}'
 ```
 
@@ -219,8 +219,8 @@ services:
     build: .
     command: node --mine --address JACK...
     ports:
-      - "9777:9777"
-      - "9776:9776"
+      - "8333:8333"
+      - "8332:8332"
 ```
 
 ---

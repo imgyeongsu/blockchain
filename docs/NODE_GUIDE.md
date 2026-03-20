@@ -1,7 +1,7 @@
 # JackpotChain 노드 실행 가이드
 
 ## AWS 시드 노드
-- **IP**: `54.116.13.57:9777`
+- **IP**: `54.116.13.57:9333`
 - **상태**: 상시 운영 중
 
 ---
@@ -19,18 +19,18 @@ jackpotchain/.venv/Scripts/activate  # Windows
 python -m jackpotchain.cli.main node \
   --mine \
   --address <지갑주소> \
-  --port 9778 \
-  --rpc-port 9779 \
+  --port 9334 \
+  --rpc-port 9335 \
   --data-dir ./data \
-  --seed 54.116.13.57:9777
+  --seed 54.116.13.57:9333
 ```
 
 ### 2. 시드 노드 전용 (채굴 없이)
 ```bash
 python -m jackpotchain.cli.main node \
   --seed-node \
-  --port 9777 \
-  --rpc-port 9776 \
+  --port 9333 \
+  --rpc-port 9332 \
   --data-dir ./data
 ```
 
@@ -38,8 +38,8 @@ python -m jackpotchain.cli.main node \
 ```bash
 nohup python -m jackpotchain.cli.main node \
   --seed-node \
-  --port 9777 \
-  --rpc-port 9776 \
+  --port 9333 \
+  --rpc-port 9332 \
   --data-dir ./data > node.log 2>&1 &
 ```
 
@@ -63,25 +63,25 @@ python -m jackpotchain.cli.main wallet address
 
 ### 블록체인 정보
 ```bash
-curl -X POST http://127.0.0.1:9779 \
+curl -X POST http://127.0.0.1:9335 \
   -d '{"method":"getblockchaininfo","params":[],"id":1}'
 ```
 
 ### 피어 정보
 ```bash
-curl -X POST http://127.0.0.1:9779 \
+curl -X POST http://127.0.0.1:9335 \
   -d '{"method":"getpeerinfo","params":[],"id":1}'
 ```
 
 ### 잔액 확인
 ```bash
-curl -X POST http://127.0.0.1:9779 \
+curl -X POST http://127.0.0.1:9335 \
   -d '{"method":"getbalance","params":["<주소>"],"id":1}'
 ```
 
 ### 특정 높이 블록 해시
 ```bash
-curl -X POST http://127.0.0.1:9779 \
+curl -X POST http://127.0.0.1:9335 \
   -d '{"method":"getblockhash","params":[100],"id":1}'
 ```
 
@@ -93,8 +93,8 @@ curl -X POST http://127.0.0.1:9779 \
 |------|------|
 | `--mine` | 채굴 활성화 |
 | `--address` | 채굴 보상 받을 지갑 주소 |
-| `--port` | P2P 포트 (기본: 9777) |
-| `--rpc-port` | RPC 포트 (기본: 9776) |
+| `--port` | P2P 포트 (기본: 8333) |
+| `--rpc-port` | RPC 포트 (기본: 8332) |
 | `--data-dir` | 블록체인 데이터 저장 경로 |
 | `--seed` | 연결할 시드 노드 (ip:port) |
 | `--seed-node` | 시드 노드로 실행 |
@@ -108,23 +108,23 @@ curl -X POST http://127.0.0.1:9779 \
 # 터미널 1 - Node1
 python -m jackpotchain.cli.main node \
   --mine --address <주소1> \
-  --port 9778 --rpc-port 9779 \
+  --port 9334 --rpc-port 9335 \
   --data-dir ./data \
-  --seed 54.116.13.57:9777
+  --seed 54.116.13.57:9333
 
 # 터미널 2 - Node2
 python -m jackpotchain.cli.main node \
   --mine --address <주소2> \
-  --port 9780 --rpc-port 9781 \
+  --port 9336 --rpc-port 9337 \
   --data-dir ./data2 \
-  --seed 127.0.0.1:9778
+  --seed 127.0.0.1:9334
 ```
 
 ### 합의 확인
 ```bash
 # 두 노드의 같은 높이 블록 해시 비교
-curl -s http://127.0.0.1:9779 -d '{"method":"getblockhash","params":[100],"id":1}'
-curl -s http://127.0.0.1:9781 -d '{"method":"getblockhash","params":[100],"id":1}'
+curl -s http://127.0.0.1:9335 -d '{"method":"getblockhash","params":[100],"id":1}'
+curl -s http://127.0.0.1:9337 -d '{"method":"getblockhash","params":[100],"id":1}'
 ```
 
 ---

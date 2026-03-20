@@ -9,13 +9,13 @@ services:
     build: .
     container_name: jackpot-seed
     ports:
-      - "9777:9777"  # P2P
-      - "9776:9776"  # RPC
+      - "8333:8333"  # P2P
+      - "8332:8332"  # RPC
     volumes:
       - seed-data:/app/data
       - seed-wallet:/app/wallet
     command: >
-      node --port 9777 --rpc-port 9776 --data-dir /app/data
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
       --mine --address X6u9TUdcTeaMuLCuSeyGCP5mxczHSdoeMZ
     networks:
       - jackpotnet
@@ -26,14 +26,14 @@ services:
     build: .
     container_name: jackpot-node2
     ports:
-      - "9778:9777"  # P2P
-      - "9779:9776"  # RPC
+      - "8334:8333"  # P2P
+      - "8335:8332"  # RPC
     volumes:
       - node2-data:/app/data
       - node2-wallet:/app/wallet
     command: >
-      node --port 9777 --rpc-port 9776 --data-dir /app/data
-      --seed seed-node:9777
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
+      --seed seed-node:8333
     depends_on:
       - seed-node
     networks:
@@ -45,14 +45,14 @@ services:
     build: .
     container_name: jackpot-node3
     ports:
-      - "9780:9777"  # P2P
-      - "9781:9776"  # RPC
+      - "8336:8333"  # P2P
+      - "8337:8332"  # RPC
     volumes:
       - node3-data:/app/data
       - node3-wallet:/app/wallet
     command: >
-      node --port 9777 --rpc-port 9776 --data-dir /app/data
-      --seed seed-node:9777
+      node --port 8333 --rpc-port 8332 --data-dir /app/data
+      --seed seed-node:8333
       --mine --address X6u9TUdcTeaMuLCuSeyGCP5mxczHSdoeMZ
     depends_on:
       - seed-node

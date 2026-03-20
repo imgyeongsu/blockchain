@@ -32,7 +32,7 @@ python -m jackpotchain.cli.main node --mine --address <지갑주소>
 
 **확인할 것:**
 ```
-[NAT] UPnP 매핑 성공: xxx.xxx.xxx.xxx:9777  ← 이거 나오면 자동 성공!
+[NAT] UPnP 매핑 성공: xxx.xxx.xxx.xxx:8333  ← 이거 나오면 자동 성공!
 ```
 
 ---
@@ -48,7 +48,7 @@ curl ifconfig.me
 
 **싸피에서 테스트:**
 ```bash
-python -m jackpotchain.cli.main node --seed <외부IP>:9777
+python -m jackpotchain.cli.main node --seed <외부IP>:8333
 ```
 
 ---
@@ -64,9 +64,9 @@ python -m jackpotchain.cli.main node --seed <외부IP>:9777
 ### 4.2 포트포워딩 설정
 | 항목 | 값 |
 |------|-----|
-| 외부 포트 | 9777 |
+| 외부 포트 | 8333 |
 | 내부 IP | 192.168.0.10 (내 PC IP) |
-| 내부 포트 | 9777 |
+| 내부 포트 | 8333 |
 | 프로토콜 | TCP |
 
 ### 4.3 공유기별 메뉴 위치
@@ -92,7 +92,7 @@ curl ifconfig.me
 
 ```powershell
 # 관리자 권한으로 PowerShell 실행
-netsh advfirewall firewall add rule name="JackpotChain P2P" dir=in action=allow protocol=tcp localport=9777
+netsh advfirewall firewall add rule name="JackpotChain P2P" dir=in action=allow protocol=tcp localport=8333
 ```
 
 ---
@@ -101,7 +101,7 @@ netsh advfirewall firewall add rule name="JackpotChain P2P" dir=in action=allow 
 
 ```bash
 # 외부에서 확인 (싸피에서)
-nc -zv <집외부IP> 9777
+nc -zv <집외부IP> 8333
 
 # 또는 온라인 도구
 # https://www.yougetsignal.com/tools/open-ports/
@@ -117,7 +117,7 @@ nc -zv <집외부IP> 9777
 # jackpotchain/network/discovery.py
 
 HARDCODED_SEEDS = [
-    ("집외부IP", 9777),  # ← 추가
+    ("집외부IP", 8333),  # ← 추가
     ("127.0.0.1", DEFAULT_PORT),
 ]
 ```
@@ -128,12 +128,12 @@ HARDCODED_SEEDS = [
 
 ```bash
 # 싸피 PC에서
-python -m jackpotchain.cli.main node --seed <집외부IP>:9777 --mine --address <지갑주소>
+python -m jackpotchain.cli.main node --seed <집외부IP>:8333 --mine --address <지갑주소>
 ```
 
 **성공 시 로그:**
 ```
-[Peer] Connected to <집IP>:9777
+[Peer] Connected to <집IP>:8333
 [Sync] Syncing from height 0 to XXX
 ```
 
@@ -144,7 +144,7 @@ python -m jackpotchain.cli.main node --seed <집외부IP>:9777 --mine --address 
 - [ ] 집 PC에서 노드 실행
 - [ ] UPnP 성공 여부 확인
 - [ ] (실패 시) 공유기 포트포워딩 설정
-- [ ] Windows 방화벽 9777 허용
+- [ ] Windows 방화벽 8333 허용
 - [ ] 외부 IP 메모
 - [ ] 포트 열림 테스트
 - [ ] 싸피에서 연결 테스트

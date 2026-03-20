@@ -28,7 +28,7 @@ pip install -r requirements.txt
 
 ### 2.2 노드 실행
 ```bash
-python -m jackpotchain.cli.main node --port 9777 --rpc-port 9776 --data-dir ./data
+python -m jackpotchain.cli.main node --port 8333 --rpc-port 8332 --data-dir ./data
 ```
 
 ### 2.3 노드+채굴 실행
@@ -83,11 +83,11 @@ Setup.exe 실행 → 다음 → 설치 완료
 설치 후 `jackpotchain` 명령어만 입력하면 TUI가 실행됩니다.
 
 ```bash
-# TUI 기본 실행 (RPC: 127.0.0.1:9776)
+# TUI 기본 실행 (RPC: 127.0.0.1:8332)
 jackpotchain
 
 # TUI 옵션 지정
-jackpotchain tui --rpc-host 127.0.0.1 --rpc-port 9776
+jackpotchain tui --rpc-host 127.0.0.1 --rpc-port 8332
 ```
 
 **TUI 기능:**

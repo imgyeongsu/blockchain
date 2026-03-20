@@ -15,19 +15,19 @@ docker build -t jackpotchain .
 # 노드 실행 (채굴 없음)
 docker run -d \
   --name jackpot-node \
-  -p 9777:9777 \
-  -p 9776:9776 \
+  -p 8333:8333 \
+  -p 8332:8332 \
   -v jackpot-data:/app/data \
   jackpotchain
 
 # 채굴 노드 실행
 docker run -d \
   --name jackpot-miner \
-  -p 9777:9777 \
-  -p 9776:9776 \
+  -p 8333:8333 \
+  -p 8332:8332 \
   -v jackpot-data:/app/data \
   jackpotchain \
-  node --port 9777 --rpc-port 9776 --data-dir /app/data \
+  node --port 8333 --rpc-port 8332 --data-dir /app/data \
   --mine --address <YOUR_ADDRESS>
 ```
 
@@ -50,9 +50,9 @@ docker-compose down -v
 **포트 매핑:**
 | 노드 | P2P | RPC |
 |------|-----|-----|
-| seed-node | 9777 | 9776 |
-| node2 | 9778 | 9779 |
-| node3 | 9780 | 9781 |
+| seed-node | 8333 | 8332 |
+| node2 | 8334 | 8335 |
+| node3 | 8336 | 8337 |
 
 ---
 
@@ -64,17 +64,17 @@ pip install -r requirements.txt
 
 # 2. 노드 실행
 python -m jackpotchain.cli.main node \
-  --port 9777 \
-  --rpc-port 9776 \
+  --port 8333 \
+  --rpc-port 8332 \
   --data-dir ./data \
   --mine --address <YOUR_ADDRESS>
 
 # 3. 시드 노드 연결
 python -m jackpotchain.cli.main node \
-  --port 9778 \
-  --rpc-port 9779 \
+  --port 8334 \
+  --rpc-port 8335 \
   --data-dir ./data2 \
-  --seed 192.168.1.100:9777
+  --seed 192.168.1.100:8333
 ```
 
 ---
@@ -85,7 +85,7 @@ python -m jackpotchain.cli.main node \
 
 ```bash
 # 1. Ubuntu 22.04 인스턴스 생성
-# 2. 보안 그룹 설정: 9777(P2P), 9776(RPC) 인바운드 허용
+# 2. 보안 그룹 설정: 8333(P2P), 8332(RPC) 인바운드 허용
 
 # Docker 설치
 sudo apt update
@@ -109,8 +109,8 @@ docker-compose up -d
 ### 시드 노드 설정
 
 1. 공인 IP가 있는 서버에 시드 노드 배포
-2. DNS 설정 (선택사항): `seed1.ssatto777.site`
-3. 방화벽에서 9777 포트 개방
+2. DNS 설정 (선택사항): `seed1.jackpotchain.io`
+3. 방화벽에서 8333 포트 개방
 
 ### 일반 노드 연결
 
@@ -118,10 +118,10 @@ docker-compose up -d
 # 시드 노드 지정
 docker run -d \
   --name jackpot-node \
-  -p 9777:9777 \
-  -p 9776:9776 \
+  -p 8333:8333 \
+  -p 8332:8332 \
   jackpotchain \
-  node --seed seed1.ssatto777.site:9777
+  node --seed seed1.jackpotchain.io:8333
 ```
 
 ### DNS 시드 업데이트
@@ -129,8 +129,8 @@ docker run -d \
 `jackpotchain/network/discovery.py`의 DNS_SEEDS 수정:
 ```python
 DNS_SEEDS = [
-    "seed1.ssatto777.site",
-    "seed2.ssatto777.site",
+    "seed1.jackpotchain.io",
+    "seed2.jackpotchain.io",
 ]
 ```
 
@@ -142,13 +142,13 @@ DNS_SEEDS = [
 
 ```bash
 # 체인 정보
-curl -X POST http://localhost:9776 -d '{"method":"getblockchaininfo","params":[],"id":1}'
+curl -X POST http://localhost:8332 -d '{"method":"getblockchaininfo","params":[],"id":1}'
 
 # 피어 정보
-curl -X POST http://localhost:9776 -d '{"method":"getpeerinfo","params":[],"id":1}'
+curl -X POST http://localhost:8332 -d '{"method":"getpeerinfo","params":[],"id":1}'
 
 # 멤풀 상태
-curl -X POST http://localhost:9776 -d '{"method":"getmempoolinfo","params":[],"id":1}'
+curl -X POST http://localhost:8332 -d '{"method":"getmempoolinfo","params":[],"id":1}'
 ```
 
 ### 지갑 생성
@@ -177,7 +177,7 @@ docker logs -f jackpot-node
 ## 문제 해결
 
 ### 피어 연결 안됨
-1. 방화벽 9777 포트 확인
+1. 방화벽 8333 포트 확인
 2. 시드 노드 주소 확인
 3. `peers.json` 삭제 후 재시작
 
