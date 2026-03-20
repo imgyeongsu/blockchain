@@ -20,9 +20,65 @@
   ```
 - **참고**: Bitcoin의 coinbase 보상 초과 블록 거부와 동일한 원리
 
-### 헤더 전용 검증 (Headers-First Sync)
-- 현재 블록 전체를 받아서 검증
-- 헤더만 먼저 검증 후 블록 바디 요청하는 방식으로 변경
+### Headers-First IBD (Initial Block Download)
+- **현재**: GETBLOCKS → INV → GETDATA 순차 동기화 (+ watchdog 재시도)
+- **목표**: 헤더 PoW 먼저 검증 → 검증된 블록만 본문 다운로드
+- **시도 결과 (2026-03-20)**:
+  - SyncManager 구현 (IDLE→HEADERS→BLOCKS→SYNCED 상태머신)
+  - 헤더 PoW 검증 동작 확인
+  - 블록 다운로드 단계에서 문제 발생:
+    1. 배치 16개 동시 요청 시 일부 유실 → `_downloading` 잔류로 stall
+    2. 블록 순서 보장 필요 (버퍼링 복잡도 증가)
+    3. 기존 coinbase height 버그 블록과 validate_block 충돌
+  - **결론**: 블록 다운로드를 파이프라인 방식(1개씩 순차 + 다음 미리 요청)으로 재설계 필요
+- **참고**: Bitcoin Core는 헤더 체인 먼저 구축 후 블록을 여러 피어에서 병렬 다운로드
+
+---
+
+## 블록 동기화 속도 개선 이력 (2026-03-20)
+
+### v1: 순차 배치 (제한 없음) — `set` 버전
+```
+_requesting: set, batch_size: 16, watchdog: 없음
+```
+- **동작**: 블록 1개 도착 → `_request_next_block()` → 16개 추가 요청
+- **문제**: 블록 7개 수신 후 `_requesting`에 360개 누적 (snowball)
+  - 매 블록 도착마다 16개씩 새로 요청 → 피어에 요청 폭탄
+  - TCP 버퍼 포화 → 유실 → stall → 영원히 멈춤 (watchdog 없음)
+- **결과**: 운 좋으면 빠르고, 운 나쁘면 멈춤. 복구 불가.
+
+### v2: set + watchdog
+```
+_requesting: set, batch_size: 16, watchdog: 10초 간격/10초 타임아웃
+```
+- **개선**: stall 시 watchdog이 `_requesting` 전체 clear → 재요청
+- **문제**: snowball은 여전. 멈출 때마다 최대 20초 대기 (10s sleep + 10s threshold)
+- **결과**: 멈춰도 복구는 되지만, 1368블록에 stall 반복 → 하루종일 걸림
+
+### v3: Dict + per-block timeout + in-flight 제한
+```
+_requesting: Dict[hash, time], batch_size: 16, in-flight 제한: batch_size개
+```
+- **개선**: 개별 블록 타임아웃 (5초), in-flight 16개 제한으로 snowball 방지
+- **문제**: in-flight 제한 + 유실 → 빈 슬롯 1개씩만 열림 → 사실상 순차 (1개씩)
+  - GETDATA 요청: 1개 블록 반복 → set 버전보다 오히려 느림
+- **결과**: 안정적이지만 느림. 브랜치 `sync-dict-inflight`에 보존.
+
+### v4: High/Low Watermark (현재) ← 채택
+```
+_requesting: set, batch_size: 16 (high), low_watermark: 4, watchdog: 5초
+```
+- **핵심**: in-flight가 **4 이하**로 떨어져야 **16까지 한번에 채움**
+  - 블록 12개 도착 (in-flight 4) → 12개 한번에 추가 요청 → in-flight 16 복귀
+  - 블록 1개 도착 (in-flight 15) → 추가 요청 안 함 (low watermark 이상)
+- **장점**:
+  1. snowball 방지 (절대 16 초과 안 함)
+  2. 배치 효율 유지 (GETDATA 1번에 12개씩)
+  3. 불필요한 요청 제거 (매 블록마다 요청 X)
+  4. watchdog 5초로 stall 빠른 복구
+- **10,000블록 예상**: 안정적 + 빠름
+  - 최적: 16블록/RTT → 10,000 / 16 * 0.2s ≈ 2분
+  - stall 포함: watchdog 5초 * stall 횟수 추가
 
 ## 네트워크
 

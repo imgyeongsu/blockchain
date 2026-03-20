@@ -106,13 +106,14 @@ class Node:
         # GETADDR 요청 시간 추적 (스팸 방지)
         self._last_getaddr: Dict[PeerAddress, float] = {}
 
-        # 순차 블록 동기화용
+        # 순차 블록 동기화용 (high/low watermark 방식)
         self._pending_blocks: List[bytes] = []  # 대기 중인 블록 해시 목록
         self._sync_peer: Optional[PeerAddress] = None  # 동기화 중인 피어
         self._requesting: set = set()  # 현재 요청 중인 블록 해시
         self._block_buffer: Dict[bytes, Block] = {}  # 순서 대기 중인 블록
-        self._batch_size: int = 16  # 동시 요청 블록 수
-        self._sync_start_time: float = 0  # 동기화 세션 시작 시각
+        self._batch_size: int = 16  # high watermark: 최대 in-flight 수
+        self._low_watermark: int = 4  # low watermark: 이 이하로 떨어지면 추가 요청
+        self._sync_start_time: float = 0  # 마지막 블록 수신 시각 (watchdog용)
         self._sync_timeout: int = 120  # 동기화 세션 타임아웃 (초)
         self._last_inv_count: int = 0  # 마지막 INV에서 받은 블록 수 (연속 동기화 판단용)
 
@@ -197,6 +198,21 @@ class Node:
         # 피어 발견 태스크
         asyncio.create_task(self._discovery_loop())
 
+        # 동기화 워치독
+        asyncio.create_task(self._sync_watchdog())
+
+    async def _sync_watchdog(self):
+        """동기화 stall 감지 — 5초 무응답 시 stale 요청 정리 후 재요청"""
+        while self._running:
+            await asyncio.sleep(5)
+            if self._sync_peer and self._pending_blocks and self._requesting:
+                if self._sync_start_time > 0 and time.time() - self._sync_start_time > 5:
+                    stale = len(self._requesting)
+                    self._requesting.clear()
+                    self._sync_start_time = time.time()
+                    print(f"[SYNC] watchdog: stale {stale}개 정리, 재요청 (대기: {len(self._pending_blocks)}개)")
+                    await self._request_next_block()
+
     async def stop(self):
         """노드 정지"""
         self._running = False
@@ -261,6 +277,7 @@ class Node:
                         print(f"[HolePunch] 피어 연결 성공: {address.ip}:{address.port}")
                         return True
 
+            print(f"[PEER] 연결 실패: {address.ip}:{address.port} - {e}")
             self.peer_manager.update_peer_state(address, PeerState.DISCONNECTED)
             return False
 
@@ -496,12 +513,17 @@ class Node:
             self._block_buffer.clear()
             return
 
-        # 요청 안 한 것 중 최대 batch_size개 선택
+        # High/Low Watermark: in-flight가 low 이하일 때만 high까지 채움
+        in_flight = len(self._requesting)
+        if in_flight > self._low_watermark:
+            return  # 아직 충분히 요청 중 — 추가 요청 안 함
+
+        slots = self._batch_size - in_flight  # high watermark까지 채울 수량
         to_request = []
         for block_hash in self._pending_blocks:
             if block_hash not in self._requesting and block_hash not in self._block_buffer:
                 to_request.append(block_hash)
-                if len(to_request) >= self._batch_size:
+                if len(to_request) >= slots:
                     break
 
         if not to_request:
@@ -538,6 +560,9 @@ class Node:
         block, _ = Block.deserialize(payload)
         peer = self.peer_manager.get_peer(address)
         block_hash = block.get_hash()
+
+        # 마지막 블록 수신 시각 갱신 (watchdog용)
+        self._sync_start_time = time.time()
 
         # 요청 목록에서 제거
         self._requesting.discard(block_hash)

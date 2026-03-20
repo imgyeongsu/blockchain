@@ -242,6 +242,7 @@ class MiningWidget(ScrollableContainer):
 
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUNBUFFERED"] = "1"
             self.node_process = subprocess.Popen(
                 cmd,
                 stdout=log_file,

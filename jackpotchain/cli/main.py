@@ -63,7 +63,7 @@ def main():
     # tui 명령
     tui_parser = subparsers.add_parser('tui', help='Launch Terminal UI')
     tui_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC host')
-    tui_parser.add_argument('--rpc-port', type=int, default=8332, help='RPC port')
+    tui_parser.add_argument('--rpc-port', type=int, default=9776, help='RPC port')
 
     args = parser.parse_args()
 
@@ -362,7 +362,7 @@ def run_tui(args):
 
 
 def run_tui_default():
-    """TUI 기본 실행 (127.0.0.1:8332)"""
+    """TUI 기본 실행 (127.0.0.1:9776)"""
     from jackpotchain.tui.app import run_tui as start_tui
     start_tui()
 

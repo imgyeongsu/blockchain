@@ -18,8 +18,8 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=8332,
-        help="RPC server port (default: 8332)"
+        default=9776,
+        help="RPC server port (default: 9776)"
     )
     args = parser.parse_args()
 
