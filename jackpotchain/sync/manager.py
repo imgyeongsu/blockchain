@@ -60,10 +60,11 @@ class SyncManager:
         self.state = SyncState.IDLE
         self._best_known_height = 0
 
-        # 다운로드 대기열
+        # 다운로드 대기열 및 고아 블록 버퍼
         self._headers_to_fetch: List[bytes] = []
         self._blocks_to_fetch: Set[bytes] = set()
         self._downloading: Set[bytes] = set()
+        self._block_buffer: dict[bytes, Block] = {}
 
         # 통계
         self._blocks_downloaded = 0
@@ -178,13 +179,14 @@ class SyncManager:
             # 블록 동기화 완료
             self.state = SyncState.SYNCED
             self.blockchain.state = ChainState.SYNCED
+            self._headers_to_fetch.clear()  # 동기화 완료 시 큐 초기화 (메모리 확보)
             return
 
         if self._request_blocks_callback:
-            # 동시 요청 제한
+            # 동시 요청 제한 (순서 보장을 위해 List 순회)
             to_request = []
-            for block_hash in self._blocks_to_fetch:
-                if block_hash not in self._downloading:
+            for block_hash in self._headers_to_fetch:
+                if block_hash in self._blocks_to_fetch and block_hash not in self._downloading:
                     to_request.append(block_hash)
                     self._downloading.add(block_hash)
                     if len(to_request) >= 16:
@@ -193,15 +195,8 @@ class SyncManager:
             if to_request:
                 await self._request_blocks_callback(to_request)
 
-    async def on_block_received(self, block: Block, peer: PeerInfo):
-        """블록 수신"""
-        block_hash = block.get_hash()
-
-        # 다운로드 목록에서 제거
-        self._downloading.discard(block_hash)
-        self._blocks_to_fetch.discard(block_hash)
-
-        # 이전 블록 헤더 및 예상 난이도
+    def _process_single_block(self, block: Block, peer: PeerInfo) -> bool:
+        """단일 블록의 체인 유효성 검증 및 추가 시도"""
         prev_block = self.blockchain.get_tip()
         prev_header = prev_block.header if prev_block else None
         expected_difficulty = get_next_difficulty(
@@ -209,7 +204,6 @@ class SyncManager:
             self.blockchain.get_block_by_height
         )
 
-        # 검증
         result = validate_block(
             block,
             self.blockchain.utxo_set,
@@ -220,16 +214,52 @@ class SyncManager:
         )
 
         if result.is_valid:
-            # 체인에 추가 (UTXO 자동 적용됨)
             success, _ = self.blockchain.add_block(block)
-            if success:
-                self._blocks_downloaded += 1
+            return success
         else:
-            # 잘못된 블록 - 피어 밴 점수 추가
             self.peer_manager.add_ban_score(peer.address, 20)
+            return False
 
-        # 추가 블록 요청
-        if self.state == SyncState.BLOCKS:
+    async def on_block_received(self, block: Block, peer: PeerInfo):
+        """블록 수신 (Orphan Buffer를 통한 순차 조립 보장)"""
+        block_hash = block.get_hash()
+
+        # 다운로드 목록에서 제거
+        self._downloading.discard(block_hash)
+        self._blocks_to_fetch.discard(block_hash)
+
+        # IBD 관할 내의 블록이라면 먼저 버퍼에 임시 보관
+        if block_hash in self._headers_to_fetch:
+            self._block_buffer[block_hash] = block
+            print(f"[BUFFER] 블록 도착 (순서 대기 중 - 버퍼 보관): {block_hash.hex()[:8]}...")
+        else:
+            # 외부 실시간 전파 블록이면 즉각 검증
+            self._process_single_block(block, peer)
+            return
+
+        # 버퍼에 쌓인 블록들을 정해진 헤더 순서대로 샅샅이 빼내어(Drain) 조립
+        blocks_added = 0
+        while self._headers_to_fetch:
+            expected_hash = self._headers_to_fetch[0]  # 차례대로 내려가야 할 다음 해시
+            if expected_hash in self._block_buffer:
+                # 다음 번 순서에 맞는 블록이 버퍼에 이미 도착해있다면 꺼낸다
+                next_block = self._block_buffer.pop(expected_hash)
+                print(f"[BUFFER] 🧩 순서 일치! 버퍼에서 꺼내어 조립 (Drain): {expected_hash.hex()[:8]}...")
+                
+                success = self._process_single_block(next_block, peer)
+                if success:
+                    self._blocks_downloaded += 1
+                    self._headers_to_fetch.pop(0)  # 성공적으로 조립되었으므로 큐에서 제거
+                    blocks_added += 1
+                else:
+                    # 검증 실패 시 동기화 진행 중단 (실제론 노드 교체 등 예외 처리 필요)
+                    break 
+            else:
+                # 다음 차례 블록이 아직 네트워크에서 안 오고 대기 중임
+                break
+
+        # 추가 블록 요청 (큐에 자리가 났을 때)
+        if self.state == SyncState.BLOCKS and blocks_added > 0:
             await self._request_blocks()
 
     def get_stats(self) -> SyncStats:
