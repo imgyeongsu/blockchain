@@ -48,7 +48,7 @@ class NATManager:
     NAT 자동 포트 매핑 관리자
 
     Usage:
-        nat = NATManager(internal_port=8333)
+        nat = NATManager(internal_port=9777)
         result = await nat.setup_port_mapping()
         if result.success:
             print(f"외부 주소: {result.external_ip}:{result.external_port}")
@@ -73,7 +73,7 @@ class NATManager:
 
     def __init__(
         self,
-        internal_port: int = 8333,
+        internal_port: int = 9777,
         lifetime: int = DEFAULT_LIFETIME,
         gateway: Optional[str] = None,
         holepunch_enabled: bool = True,
