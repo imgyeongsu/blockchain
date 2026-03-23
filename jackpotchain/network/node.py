@@ -959,7 +959,9 @@ class Node:
         inv = InvMessage([item])
         payload = inv.serialize()
 
-        for addr in list(self._connections.keys()):
+        peers = list(self._connections.keys())
+        _log('TX', f'브로드캐스트: {tx.get_txid().hex()[:16]}... → {len(peers)}개 피어')
+        for addr in peers:
             await self._send_message(addr, MessageType.INV, payload)
 
     async def _relay_block(self, block: Block, exclude: PeerAddress = None):
