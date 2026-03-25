@@ -889,7 +889,8 @@ class Node:
             if peer:
                 peer.bytes_sent += len(message)
                 peer.last_send = time.time()
-        except Exception:
+        except Exception as e:
+            _log('ERROR', f'메시지 전송 실패 ({address}, {msg_type.name}): {type(e).__name__}: {e}')
             await self._disconnect(address)
 
     async def _disconnect(self, address: PeerAddress):
