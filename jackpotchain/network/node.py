@@ -450,10 +450,10 @@ class Node:
         # 피어에게 주소 요청
         await self._send_getaddr(address)
 
-        # 동기화 체크 (아웃바운드는 VERSION 수신 후에 체크)
+        # 동기화 체크 (READY 상태 확정 후 인바운드/아웃바운드 모두 체크)
+        # 아웃바운드는 VERSION 수신 시 아직 READY가 아니라 스킵되므로 여기서 처리
         peer = self.peer_manager.get_peer(address)
-        if peer and peer.is_inbound:
-            # 인바운드면 VERACK 받은 후 동기화 체크
+        if peer and peer.state == PeerState.READY:
             await self._check_sync(address)
 
     async def _check_sync(self, address: PeerAddress):
