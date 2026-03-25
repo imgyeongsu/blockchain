@@ -35,8 +35,8 @@ def main():
 
     # node 명령
     node_parser = subparsers.add_parser('node', help='Run a node')
-    node_parser.add_argument('--port', type=int, default=9777, help='P2P port')
-    node_parser.add_argument('--rpc-port', type=int, default=9776, help='RPC port')
+    node_parser.add_argument('--port', type=int, default=8777, help='P2P port')
+    node_parser.add_argument('--rpc-port', type=int, default=8776, help='RPC port')
     node_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC bind host (default: 127.0.0.1)')
     node_parser.add_argument('--data-dir', default=None, help='Data directory (default: %%APPDATA%%/JackpotChain/data)')
     node_parser.add_argument('--wallet-file', default=None, help='Wallet file path (default: %%APPDATA%%/JackpotChain/wallets/default.json)')
@@ -64,7 +64,7 @@ def main():
     # tui 명령
     tui_parser = subparsers.add_parser('tui', help='Launch Terminal UI')
     tui_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC host')
-    tui_parser.add_argument('--rpc-port', type=int, default=9776, help='RPC port')
+    tui_parser.add_argument('--rpc-port', type=int, default=8776, help='RPC port')
     tui_parser.add_argument('--simple', action='store_true', help='Launch simple mode')
 
     args = parser.parse_args()
@@ -368,7 +368,7 @@ def run_tui(args):
 
 
 def run_tui_default():
-    """TUI 기본 실행 (127.0.0.1:9776)"""
+    """TUI 기본 실행 (127.0.0.1:8776)"""
     from jackpotchain.tui.app import run_tui as start_tui
     start_tui()
 
@@ -380,7 +380,7 @@ def run_simple_tui(args):
 
 
 def run_simple_default():
-    """Simple TUI 기본 실행 (127.0.0.1:9776)"""
+    """Simple TUI 기본 실행 (127.0.0.1:8776)"""
     from jackpotchain.tui.simple import run_simple
     run_simple()
 

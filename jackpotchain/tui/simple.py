@@ -137,7 +137,7 @@ class SimpleApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 9776):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8776):
         super().__init__()
         self.rpc = RPCClient(host, port)
         self._current_view = "home"
@@ -573,7 +573,7 @@ class SimpleApp(App):
                 self._node_process.kill()
 
 
-def run_simple(host: str = "127.0.0.1", port: int = 9776):
+def run_simple(host: str = "127.0.0.1", port: int = 8776):
     """Simple TUI 실행"""
     app = SimpleApp(host, port)
     app.run()
