@@ -499,6 +499,11 @@ class Node:
                     block_hashes.append(item.hash)
 
         if block_hashes:
+            # 동기화 중에 다른 피어의 소규모 INV는 무시 (동기화 피어의 INV만 처리)
+            if self._sync_peer and self._sync_peer != address and self._pending_blocks:
+                _log('SYNC', f'동기화 중 다른 피어 INV 무시: {block_count}개 from {address}')
+                return
+
             # 대기열 크기 제한
             if len(block_hashes) > MAX_PENDING_BLOCKS:
                 _log('SYNC', f'대기열 크기 제한: {len(block_hashes)} -> {MAX_PENDING_BLOCKS}')
