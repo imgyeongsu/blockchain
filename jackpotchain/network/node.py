@@ -212,6 +212,9 @@ class Node:
         # 동기화 워치독
         asyncio.create_task(self._sync_watchdog())
 
+        # 피어 ping keepalive
+        asyncio.create_task(self._ping_loop())
+
     async def _sync_watchdog(self):
         """동기화 stall 감지 — 5초 무응답 시 stale 요청 정리 후 재요청"""
         while self._running:
@@ -561,10 +564,14 @@ class Node:
                     await self._send_message(address, MessageType.BLOCK, block.serialize())
             elif item.inv_type == InvType.TX:
                 # Mempool에서 TX 조회 후 전송
+                tx = None
                 if self.mempool:
                     tx = self.mempool.get_tx(item.hash)
-                    if tx:
-                        await self._send_message(address, MessageType.TX, tx.serialize())
+                # mempool에 없으면 최근 블록에서 검색 (채굴 직후 레이스 컨디션 대응)
+                if tx is None:
+                    tx = self._find_tx_in_recent_blocks(item.hash)
+                if tx:
+                    await self._send_message(address, MessageType.TX, tx.serialize())
 
     async def _handle_block(self, address: PeerAddress, payload: bytes):
         """BLOCK 수신"""
@@ -601,6 +608,11 @@ class Node:
         if self._on_block:
             self._on_block(block, peer)
 
+        # 블록에 포함된 TX를 mempool에서 제거 (콜백 누락 대비 안전장치)
+        if self.mempool:
+            for tx in block.transactions[1:]:  # coinbase 제외
+                self.mempool.remove_tx(tx.get_txid())
+
         # 피어 높이 갱신 (체인 현재 높이로)
         chain_height = self.blockchain.get_height() if self.blockchain else 0
         if chain_height > 0:
@@ -621,6 +633,10 @@ class Node:
                 if self.blockchain.has_block(buf_block.header.prev_block_hash):
                     if self._on_block:
                         self._on_block(buf_block, peer)
+                    # 블록에 포함된 TX를 mempool에서 제거
+                    if self.mempool:
+                        for tx in buf_block.transactions[1:]:
+                            self.mempool.remove_tx(tx.get_txid())
                     # 재전파
                     await self._relay_block(buf_block, exclude=address)
                     del self._block_buffer[buf_hash]
@@ -900,6 +916,15 @@ class Node:
         for addr in to_connect:
             await self.connect_to_peer(addr)
 
+    async def _ping_loop(self):
+        """주기적으로 연결된 피어에 ping 전송 — 타임아웃(300s) 방지"""
+        import os
+        while self._running:
+            await asyncio.sleep(120)
+            for address in list(self._connections.keys()):
+                nonce = os.urandom(8)
+                await self._send_message(address, MessageType.PING, nonce)
+
     async def _maintain_connections(self):
         """연결 유지"""
         while self._running:
@@ -954,15 +979,17 @@ class Node:
             await self._send_message(addr, MessageType.INV, payload)
 
     async def broadcast_tx(self, tx: Transaction):
-        """TX 브로드캐스트"""
+        """TX 브로드캐스트 (병렬 전송)"""
         item = InvItem(InvType.TX, tx.get_txid())
         inv = InvMessage([item])
         payload = inv.serialize()
 
         peers = list(self._connections.keys())
         _log('TX', f'브로드캐스트: {tx.get_txid().hex()[:16]}... → {len(peers)}개 피어')
-        for addr in peers:
-            await self._send_message(addr, MessageType.INV, payload)
+        await asyncio.gather(
+            *(self._send_message(addr, MessageType.INV, payload) for addr in peers),
+            return_exceptions=True
+        )
 
     async def _relay_block(self, block: Block, exclude: PeerAddress = None):
         """블록 재전파 (수신한 피어 제외)"""
@@ -980,11 +1007,25 @@ class Node:
             _log('RELAY', f'블록 {block.get_hash().hex()[:16]}... → {relayed}개 피어')
 
     async def _relay_tx(self, tx: Transaction, exclude: PeerAddress = None):
-        """TX 재전파 (수신한 피어 제외)"""
+        """TX 재전파 (수신한 피어 제외, 병렬 전송)"""
         item = InvItem(InvType.TX, tx.get_txid())
         inv = InvMessage([item])
         payload = inv.serialize()
 
-        for addr in list(self._connections.keys()):
-            if addr != exclude:
-                await self._send_message(addr, MessageType.INV, payload)
+        targets = [addr for addr in self._connections.keys() if addr != exclude]
+        if targets:
+            await asyncio.gather(
+                *(self._send_message(addr, MessageType.INV, payload) for addr in targets),
+                return_exceptions=True
+            )
+
+    def _find_tx_in_recent_blocks(self, txid: bytes, depth: int = 10) -> Optional[Transaction]:
+        """최근 블록에서 TX 검색 (mempool에서 제거된 직후 GETDATA 대응)"""
+        height = self.blockchain.get_height()
+        for h in range(height, max(0, height - depth), -1):
+            block = self.blockchain.get_block_by_height(h)
+            if block:
+                for tx in block.transactions:
+                    if tx.get_txid() == txid:
+                        return tx
+        return None

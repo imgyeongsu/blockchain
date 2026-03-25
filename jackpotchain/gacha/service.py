@@ -249,6 +249,7 @@ class GachaService:
         gacha_type: str = "lotto",
         is_spent_in_mempool: Callable[[bytes, int], bool] = None,
         mempool=None,
+        from_address: str = None,
     ) -> Tuple[Optional[Transaction], Optional[PendingCommit], str]:
         """Commit TX 생성"""
         if chosen_numbers is not None:
@@ -264,7 +265,7 @@ class GachaService:
             ]
 
         # POT UTXO 선택 (mempool에서 사용 중인 UTXO 제외, 미확인 잔돈 포함)
-        pot_utxos = self._select_pot_utxos(wallet, utxo_set, LOTTO_COST_POT, current_height, is_spent_in_mempool, mempool)
+        pot_utxos = self._select_pot_utxos(wallet, utxo_set, LOTTO_COST_POT, current_height, is_spent_in_mempool, mempool, from_address)
         if not pot_utxos:
             return None, None, f"Insufficient POT balance (need {LOTTO_COST_POT / 1e8} POT)"
 
@@ -285,7 +286,7 @@ class GachaService:
             total_pot += utxo.output.assets.get(ASSET_ID_POT, 0)
 
         if total_jack < MIN_TX_FEE:
-            jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height, is_spent_in_mempool, mempool)
+            jack_utxos = self._select_jack_utxos(wallet, utxo_set, MIN_TX_FEE, current_height, is_spent_in_mempool, mempool, from_address)
             for utxo in jack_utxos:
                 inp = TxInput(
                     prev_tx_id=utxo.tx_id,
@@ -307,7 +308,7 @@ class GachaService:
         # 2. POT 잔돈
         pot_change = total_pot - LOTTO_COST_POT
         if pot_change > 0:
-            change_addr = wallet.get_change_address()
+            change_addr = from_address or wallet.get_change_address()
             outputs.append(TxOutput(
                 jack_value=0,
                 script_pubkey=create_p2pkh_script_pubkey(address_to_pubkey_hash(change_addr)),
@@ -317,7 +318,7 @@ class GachaService:
         # 3. JACK 잔돈
         jack_change = total_jack - MIN_TX_FEE
         if jack_change > 0:
-            change_addr = wallet.get_change_address()
+            change_addr = from_address or wallet.get_change_address()
             outputs.append(TxOutput(
                 jack_value=jack_change,
                 script_pubkey=create_p2pkh_script_pubkey(address_to_pubkey_hash(change_addr))
@@ -427,7 +428,7 @@ class GachaService:
 
     def _select_pot_utxos(self, wallet, utxo_set, amount, current_height,
                           is_spent_in_mempool: Callable[[bytes, int], bool] = None,
-                          mempool=None) -> List[UTXO]:
+                          mempool=None, from_address: str = None) -> List[UTXO]:
         from ..script.standard import get_address_from_script_pubkey
 
         # 확정 UTXO + mempool 미확인 잔돈 합치기
@@ -440,6 +441,10 @@ class GachaService:
             for u in unconfirmed:
                 if (u.tx_id, u.output_index) not in confirmed_outpoints:
                     utxos.append(u)
+
+        # from_address 지정 시 해당 주소 UTXO만 필터
+        if from_address:
+            utxos = [u for u in utxos if get_address_from_script_pubkey(u.output.script_pubkey) == from_address]
 
         pot_utxos = []
         total = 0
@@ -461,7 +466,7 @@ class GachaService:
 
     def _select_jack_utxos(self, wallet, utxo_set, amount, current_height,
                            is_spent_in_mempool: Callable[[bytes, int], bool] = None,
-                           mempool=None) -> List[UTXO]:
+                           mempool=None, from_address: str = None) -> List[UTXO]:
         from ..script.standard import get_address_from_script_pubkey
 
         utxos = wallet.get_utxos(utxo_set)
@@ -472,6 +477,10 @@ class GachaService:
             for u in unconfirmed:
                 if (u.tx_id, u.output_index) not in confirmed_outpoints:
                     utxos.append(u)
+
+        # from_address 지정 시 해당 주소 UTXO만 필터
+        if from_address:
+            utxos = [u for u in utxos if get_address_from_script_pubkey(u.output.script_pubkey) == from_address]
 
         jack_utxos = []
         total = 0

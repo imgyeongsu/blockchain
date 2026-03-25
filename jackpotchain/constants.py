@@ -155,8 +155,8 @@ COINBASE_MATURITY = 100          # Coinbase 사용 가능까지 필요한 확인
 # =============================================================================
 # 네트워크 제한
 # =============================================================================
-MAX_OUTBOUND_CONNECTIONS = 8
-MAX_INBOUND_CONNECTIONS = 32  # 시드노드는 많은 연결 수용
+MAX_OUTBOUND_CONNECTIONS = 4               # AWS 무료 t2.micro (1vCPU/1GB) 대응
+MAX_INBOUND_CONNECTIONS = 16               # 무료 플랜 메모리 제한 고려
 MAX_INV_SIZE = 50000             # INV 메시지 최대 항목
 MAX_HEADERS_SIZE = 2000          # HEADERS 응답 최대 개수
 

@@ -441,12 +441,12 @@ class RPCServer:
             utxos = self.blockchain.utxo_set.get_utxos_for_address(address)
             return [
                 {
-                    'txid': utxo.outpoint.txid.hex(),
-                    'vout': utxo.outpoint.index,
+                    'txid': utxo.tx_id.hex(),
+                    'vout': utxo.output_index,
                     'address': address,
                     'amount': utxo.output.jack_value / 100_000_000,
                     'assets': utxo.output.assets,
-                    'confirmations': self.blockchain.get_height() - utxo.block_height + 1
+                    'confirmations': max(0, self.blockchain.get_height() - utxo.block_height + 1)
                 }
                 for utxo in utxos
             ]
@@ -740,7 +740,7 @@ class RPCServer:
             'snapshot_count': pool_stats.get('snapshot_count', 0),
         }
 
-    async def _lottocommit(self, chosen_numbers: list = None) -> dict:
+    async def _lottocommit(self, chosen_numbers: list = None, from_address: str = None) -> dict:
         """
         로또 참여 (Commit TX 생성 및 전파)
 
@@ -769,6 +769,7 @@ class RPCServer:
             chosen_numbers=chosen_numbers,
             is_spent_in_mempool=self.mempool.is_utxo_spent if self.mempool else None,
             mempool=self.mempool,
+            from_address=from_address,
         )
 
         if error:
@@ -911,7 +912,7 @@ class RPCServer:
             'min_jack': EXCHANGE_RATE,
         }
 
-    async def _exchangetopot(self, jack_amount: float) -> dict:
+    async def _exchangetopot(self, jack_amount: float, from_address: str = None) -> dict:
         """
         JACK -> POT 교환
 
@@ -937,6 +938,11 @@ class RPCServer:
         # UTXO 선택
         utxos = self.wallet.get_utxos(self.blockchain.utxo_set)
         current_height = self.blockchain.get_height()
+
+        # from_address 지정 시 해당 주소 UTXO만 필터
+        if from_address:
+            from ..script.standard import get_address_from_script_pubkey
+            utxos = [u for u in utxos if get_address_from_script_pubkey(u.output.script_pubkey) == from_address]
 
         # Mature UTXO만 선택 + mempool에서 사용 중이 아닌 것
         mature_utxos = [
@@ -965,10 +971,9 @@ class RPCServer:
         if total < jack_satoshi:
             raise Exception(f"Insufficient JACK balance: {total / COIN} < {jack_amount}")
 
-        # 주소
-        addresses = self.wallet.get_addresses()
-        recipient = addresses[0] if addresses else ""
-        change_addr = self.wallet.get_change_address()
+        # 주소 (from_address 지정 시 해당 주소로 잔돈 반환)
+        recipient = from_address or (self.wallet.get_addresses()[0] if self.wallet.get_addresses() else "")
+        change_addr = from_address or self.wallet.get_change_address()
 
         # 교환 TX 생성
         tx, error = create_exchange_tx(

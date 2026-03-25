@@ -37,6 +37,7 @@ def main():
     node_parser = subparsers.add_parser('node', help='Run a node')
     node_parser.add_argument('--port', type=int, default=9777, help='P2P port')
     node_parser.add_argument('--rpc-port', type=int, default=9776, help='RPC port')
+    node_parser.add_argument('--rpc-host', default='127.0.0.1', help='RPC bind host (default: 127.0.0.1)')
     node_parser.add_argument('--data-dir', default=None, help='Data directory (default: %%APPDATA%%/JackpotChain/data)')
     node_parser.add_argument('--wallet-file', default=None, help='Wallet file path (default: %%APPDATA%%/JackpotChain/wallets/default.json)')
     node_parser.add_argument('--seed', action='append', help='Seed node (ip:port)')
@@ -141,6 +142,7 @@ def run_node(args):
         node=node,
         data_dir=data_dir,
         wallet_dir=wallet_dir,
+        host=args.rpc_host,
         port=args.rpc_port
     )
 
@@ -297,7 +299,7 @@ def run_node(args):
         await node.start()
         await rpc.start()
 
-        print(f"Node running. RPC at http://127.0.0.1:{args.rpc_port}")
+        print(f"Node running. RPC at http://{args.rpc_host}:{args.rpc_port}")
 
         tasks = []
 
