@@ -39,7 +39,7 @@ class JackpotChainApp(App):
         Binding("ctrl+q", "quit", "Quit", show=True, priority=True),
     ]
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 9776, wallet_dir: str = None):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8776, wallet_dir: str = None):
         super().__init__()
         self.rpc = RPCClient(host, port)
         self._current_tab = "dashboard"
@@ -177,7 +177,7 @@ class JackpotChainApp(App):
             current.refresh_data()
 
 
-def run_tui(host: str = "127.0.0.1", port: int = 9776):
+def run_tui(host: str = "127.0.0.1", port: int = 8776):
     """TUI 실행"""
     app = JackpotChainApp(host, port)
     app.run()
