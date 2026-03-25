@@ -213,14 +213,13 @@ def create_genesis_block(miner_address: str = None) -> Block:
         locktime=0
     )
 
-    # 블록 헤더 (하드코딩된 값 사용)
     header = BlockHeader(
         version=1,
         prev_block_hash=bytes(32),
-        merkle_root=GENESIS_MERKLE_ROOT,  # 하드코딩
+        merkle_root=GENESIS_MERKLE_ROOT,
         timestamp=GENESIS_TIMESTAMP,
         difficulty_target=INITIAL_DIFFICULTY,
-        nonce=GENESIS_NONCE  # 하드코딩
+        nonce=GENESIS_NONCE
     )
 
     block = Block(header=header, transactions=[coinbase_tx])

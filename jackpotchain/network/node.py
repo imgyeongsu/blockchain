@@ -500,9 +500,21 @@ class Node:
 
         if block_hashes:
             # 동기화 중에 다른 피어의 소규모 INV는 무시 (동기화 피어의 INV만 처리)
+            # 단, 더 긴 체인을 가진 피어의 INV는 허용 (리오그 대응)
             if self._sync_peer and self._sync_peer != address and self._pending_blocks:
-                _log('SYNC', f'동기화 중 다른 피어 INV 무시: {block_count}개 from {address}')
-                return
+                peer = self.peer_manager.get_peer(address)
+                sync_peer = self.peer_manager.get_peer(self._sync_peer)
+                peer_h = peer.start_height if peer else 0
+                sync_h = sync_peer.start_height if sync_peer else 0
+                if peer_h <= sync_h:
+                    _log('SYNC', f'동기화 중 다른 피어 INV 무시: {block_count}개 from {address}')
+                    return
+                # 더 긴 체인의 피어 → 동기화 피어 전환
+                _log('SYNC', f'더 긴 체인 피어 발견: {address} (h={peer_h}) > sync_peer (h={sync_h}), 전환')
+                self._sync_peer = None
+                self._pending_blocks.clear()
+                self._requesting.clear()
+                self._block_buffer.clear()
 
             # 대기열 크기 제한
             if len(block_hashes) > MAX_PENDING_BLOCKS:
@@ -609,8 +621,20 @@ class Node:
 
                 self._block_buffer[block_hash] = block
             else:
-                # 동기화 목록에 없는 블록 - GETBLOCKS 요청
-                _log('SYNC', f'이전 블록 없음, GETBLOCKS 요청 (prev={prev_hash.hex()[:16]}...)')
+                # 동기화 목록에 없는 블록 → 포크 가능성
+                # 피어가 더 긴 체인이면 동기화 피어 전환 후 GETBLOCKS
+                peer = self.peer_manager.get_peer(address)
+                peer_h = peer.start_height if peer else 0
+                my_h = self.blockchain.get_height() if self.blockchain else 0
+                _log('SYNC', f'이전 블록 없음 (prev={prev_hash.hex()[:16]}...), '
+                     f'피어 높이={peer_h}, 내 높이={my_h}')
+                if peer_h > my_h:
+                    # 더 긴 체인 → 동기화 전환 (리오그 트리거)
+                    _log('SYNC', f'더 긴 체인 감지, 동기화 전환: {address}')
+                    self._sync_peer = address
+                    self._pending_blocks.clear()
+                    self._requesting.clear()
+                    self._block_buffer.clear()
                 await self._request_blocks(address)
             return
 
@@ -658,15 +682,19 @@ class Node:
         # 다음 배치 요청
         if self._pending_blocks:
             await self._request_next_block()
-        elif self._last_inv_count >= 500 and self._sync_peer:
-            # 이전 INV가 최대치(500)였으면 피어에 더 많은 블록이 있을 수 있음
-            _log('SYNC', f'배치 완료 (높이: {self.height}), 추가 블록 요청...')
-            await self._request_blocks(self._sync_peer)
-        else:
-            _log('SYNC', f'동기화 완료! 현재 높이: {self.height}')
-            self._sync_peer = None
-            self._block_buffer.clear()
-            self._requesting.clear()  # 요청 잔여물 초기화 (5.5)
+        elif self._sync_peer:
+            # 피어 높이와 비교하여 추가 블록이 있는지 확인
+            sync_peer_info = self.peer_manager.get_peer(self._sync_peer)
+            peer_h = sync_peer_info.start_height if sync_peer_info else 0
+            my_h = self.blockchain.get_height() if self.blockchain else 0
+            if self._last_inv_count >= 500 or my_h < peer_h:
+                _log('SYNC', f'배치 완료 (높이: {my_h}, 피어: {peer_h}), 추가 블록 요청...')
+                await self._request_blocks(self._sync_peer)
+            else:
+                _log('SYNC', f'동기화 완료! 현재 높이: {my_h}')
+                self._sync_peer = None
+                self._block_buffer.clear()
+                self._requesting.clear()
 
     async def _handle_tx(self, address: PeerAddress, payload: bytes):
         """TX 수신 (orphan TX 대기열 포함)"""

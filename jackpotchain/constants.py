@@ -16,7 +16,7 @@ def get_default_data_dir() -> str:
 # =============================================================================
 # 네트워크 파라미터
 # =============================================================================
-NETWORK_MAGIC = b'\xf9\xbe\xb4\xd9'  # 메시지 헤더 매직 바이트
+NETWORK_MAGIC = b'\x4a\x50\x43\x48'  # JackpotChain 고유 매직 바이트 (JPCH)
 DEFAULT_PORT = 8777
 DEFAULT_RPC_PORT = 8776
 
@@ -38,7 +38,7 @@ INITIAL_DIFFICULTY = 0x1e200000  # 테스트넷 초기 난이도
 # =============================================================================
 # 보상 및 수수료
 # =============================================================================
-BLOCK_REWARD = 50_00_000_000     # 50 JACK (satoshi 단위)
+BLOCK_REWARD = 100_00_000_000    # 100 JACK (satoshi 단위)
 MIN_TX_FEE = 1_000_000           # 최소 수수료 0.01 JACK
 MIN_RELAY_FEE = 1_000_000        # 최소 릴레이 수수료
 
@@ -179,11 +179,12 @@ MAX_TX_SIZE = 100_000            # 단일 TX 최대 크기 (100 KB)
 # =============================================================================
 # Genesis Block
 # =============================================================================
-GENESIS_TIMESTAMP = 1735689600   # 2025-01-01 00:00:00 UTC
-GENESIS_MESSAGE = b"JackpotChain Genesis - 2025"
+GENESIS_TIMESTAMP = 1742860800   # 2025-03-25 00:00:00 UTC
+GENESIS_MESSAGE = b"JackpotChain Mainnet Launch - 2025-03-25"
 GENESIS_JACKPOT_POOL_FUNDING = 1_000_000 * COIN  # 100만 JACK 잭팟풀 초기 자금
 
 # 하드코딩된 제네시스 블록 값 (AWS 시드 노드에서 생성)
+# 하드코딩된 제네시스 블록 값
 GENESIS_NONCE = 0
-GENESIS_MERKLE_ROOT = bytes.fromhex("802a573854dabc3c2b7afd5bf3e80a2c0c3549125769550c260ca2509d485d74")
-GENESIS_HASH = bytes.fromhex("c41d65b3c0b76dea7142202a37f5b10f8275aba8370387636e35640e30c7a0d9")
+GENESIS_MERKLE_ROOT = bytes.fromhex("94e2cb1931b4c83776e7e43bb45197ccfd1f31ee993c113c122d2c2ee531024d")
+GENESIS_HASH = bytes.fromhex("0bd93d2ee2fb4642e4cdb5f3a534b50bda573811d2b661c22b2c9d63f37d51ff")
