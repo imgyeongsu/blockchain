@@ -368,9 +368,9 @@ class Node:
                     await self._process_message(address, header, payload)
 
         except asyncio.TimeoutError:
-            pass
+            _log('PEER', f'타임아웃: {address}')
         except Exception as e:
-            pass
+            _log('ERROR', f'피어 핸들링 오류 ({address}): {type(e).__name__}: {e}')
         finally:
             await self._disconnect(address)
 
@@ -556,12 +556,17 @@ class Node:
     async def _handle_getdata(self, address: PeerAddress, payload: bytes):
         """GETDATA 처리"""
         getdata = GetDataMessage.deserialize(payload)
+        block_count = sum(1 for i in getdata.items if i.inv_type == InvType.BLOCK)
+        tx_count = sum(1 for i in getdata.items if i.inv_type == InvType.TX)
+        _log('SYNC', f'GETDATA 수신: 블록 {block_count}개, TX {tx_count}개 from {address}')
 
         for item in getdata.items:
             if item.inv_type == InvType.BLOCK:
                 block = self.blockchain.get_block(item.hash)
                 if block:
                     await self._send_message(address, MessageType.BLOCK, block.serialize())
+                else:
+                    _log('SYNC', f'GETDATA 블록 없음: {item.hash.hex()[:16]}...')
             elif item.inv_type == InvType.TX:
                 # Mempool에서 TX 조회 후 전송
                 tx = None
