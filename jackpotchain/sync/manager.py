@@ -361,8 +361,9 @@ class SyncManager:
         if success:
             self._blocks_downloaded += 1
 
-            # reorg 감지 → 버퍼 flush
-            if self.blockchain.state == ChainState.REORGING:
+            # reorg 감지 → SYNCED 상태(실시간)에서만 버퍼 flush
+            # IBD 중에는 블록 순서가 뒤섞여 리오그가 빈번하므로 버퍼를 유지해야 함
+            if self.blockchain.state == ChainState.REORGING and self.state == SyncState.SYNCED:
                 _log('SYNC', f'reorg 감지 — 블록 버퍼 초기화 ({len(self._block_buffer)}개)')
                 self._block_buffer.clear()
 
