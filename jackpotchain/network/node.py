@@ -549,7 +549,7 @@ class Node:
         # ===== SYNCED 상태: 실시간 블록 처리 =====
         block_hash = block.get_hash()
 
-        # 이전 블록이 아예 없으면 버퍼에 저장 + 경쟁 체인 동기화 시도
+        # 이전 블록이 아예 없으면 버퍼에 저장 + prev 블록 직접 요청 (역추적)
         prev_hash = block.header.prev_block_hash
         if prev_hash != bytes(32) and prev_hash not in self.blockchain._block_index:
             if len(self._block_buffer) >= MAX_BLOCK_BUFFER_SIZE:
@@ -566,6 +566,10 @@ class Node:
                     self.blockchain.get_height() + 2
                 )
                 await self.sync_manager.start_sync()
+            # prev 블록을 GETDATA로 직접 요청 (역추적 동기화)
+            _log('SYNC', f'prev 블록 없음, GETDATA로 직접 요청: {prev_hash.hex()[:16]}')
+            getdata = GetDataMessage(items=[InvItem(InvType.BLOCK, prev_hash)])
+            await self._send_message(address, MessageType.GETDATA, getdata.serialize())
             return
 
         # 블록 처리

@@ -60,6 +60,10 @@ class SyncManager:
     MAX_BLOCK_BUFFER = 1000
     # 블록 수신 타임아웃 (초)
     STALL_TIMEOUT = 30
+    # HEADERS 응답 타임아웃 (초)
+    HEADERS_TIMEOUT = 10
+    # HEADERS 재시도 최대 횟수
+    MAX_HEADERS_RETRIES = 2
 
     def __init__(
         self,
@@ -89,6 +93,11 @@ class SyncManager:
         self._blocks_downloaded = 0
         self._download_start_time = 0
         self._last_block_time = 0
+
+        # HEADERS 타임아웃
+        self._headers_request_time: float = 0
+        self._headers_retries: int = 0
+        self._watchdog_task: Optional[asyncio.Task] = None
 
         # 콜백 (node.py에서 설정)
         self._request_headers_callback = None   # async (locator, peer_address?) -> None
@@ -122,9 +131,15 @@ class SyncManager:
         self._download_start_time = time.time()
         self._blocks_downloaded = 0
         self._headers_synced = 0
+        self._headers_retries = 0
 
         _log('SYNC', f'헤더 우선 동기화 시작: 로컬={self.blockchain.get_height()}, 목표={self._best_known_height}')
         await self._request_headers()
+
+        # watchdog 시작
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+        self._watchdog_task = asyncio.ensure_future(self._headers_watchdog())
 
     # =================================================================
     # 헤더 동기화
@@ -137,7 +152,34 @@ class SyncManager:
             # 헤더 전용 블록의 마지막 해시를 locator 앞에 추가
             if self._last_header_hash and self._last_header_hash not in locator:
                 locator = [self._last_header_hash] + locator
+            self._headers_request_time = time.time()
             await self._request_headers_callback(locator)
+
+    async def _headers_watchdog(self):
+        """HEADERS 응답 타임아웃 감시 — 응답 없으면 재시도 또는 IDLE 복귀"""
+        try:
+            while self.state == SyncState.HEADERS:
+                await asyncio.sleep(self.HEADERS_TIMEOUT)
+
+                if self.state != SyncState.HEADERS:
+                    break
+
+                elapsed = time.time() - self._headers_request_time
+                if elapsed < self.HEADERS_TIMEOUT:
+                    continue
+
+                self._headers_retries += 1
+                if self._headers_retries <= self.MAX_HEADERS_RETRIES:
+                    _log('SYNC', f'HEADERS 타임아웃 ({elapsed:.0f}초), 재시도 {self._headers_retries}/{self.MAX_HEADERS_RETRIES}')
+                    await self._request_headers()
+                else:
+                    _log('SYNC', f'HEADERS 재시도 초과 ({self.MAX_HEADERS_RETRIES}회), INV 블록 수신 모드로 전환')
+                    self.state = SyncState.SYNCED
+                    self.blockchain.state = ChainState.SYNCED
+                    self._headers_retries = 0
+                    break
+        except asyncio.CancelledError:
+            pass
 
     async def on_headers_received(self, peer_address: PeerAddress, raw_headers: List[bytes]):
         """
@@ -149,6 +191,10 @@ class SyncManager:
         """
         if self.state != SyncState.HEADERS:
             return
+
+        # HEADERS 응답 수신 → 타임아웃 타이머 리셋
+        self._headers_request_time = time.time()
+        self._headers_retries = 0
 
         if not raw_headers:
             # 빈 응답 → 헤더 동기화 완료
