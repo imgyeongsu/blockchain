@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-from ..core.block import Block, create_genesis_block
+from ..core.block import Block, BlockHeader, create_genesis_block
 from ..core.utxo import UTXO, UTXOSet
 from .difficulty import compact_to_target
 from ..script.standard import get_address_from_script_pubkey, is_commit_script, extract_commit_numbers, is_payout_script, extract_payout_data
@@ -94,6 +94,9 @@ class Blockchain:
 
         # Reorg 시 mempool 복원 대상 TX (add_block 호출자가 가져감)
         self._disconnected_txs: list = []
+
+        # 헤더 전용 저장소 (블록 없이 헤더만 저장, 헤더 우선 동기화용)
+        self._header_only: Dict[bytes, BlockHeader] = {}
 
         # 상태
         self.state = ChainState.SYNCING
@@ -277,6 +280,9 @@ class Blockchain:
                 # UTXO 적용 및 undo 데이터 저장
                 self._connect_block(block, new_height)
 
+            # 헤더 전용 저장소에서 제거 (블록이 도착했으므로)
+            self._header_only.pop(block_hash, None)
+
             # 영구 저장
             if self._store:
                 self._store.save_block(block, new_height)
@@ -284,6 +290,7 @@ class Blockchain:
             print(f"[CHAIN] 블록 추가 성공: height={new_height}, hash={block_hash.hex()[:16]}...")
             return True, "Block added to main chain"
         else:
+            self._header_only.pop(block_hash, None)
             print(f"[CHAIN] 사이드 체인에 추가: hash={block_hash.hex()[:16]}...")
             return True, "Block added to side chain"
 
@@ -358,6 +365,9 @@ class Blockchain:
             block = self._blocks[block_hash]
             height = self._block_index[block_hash].height
             self._connect_block(block, height)
+            # reorg된 블록을 스토리지에도 반영
+            if self._store:
+                self._store.save_block(block, height)
             for tx in block.transactions[1:]:
                 new_chain_txids.add(tx.get_txid())
 
@@ -633,3 +643,111 @@ class Blockchain:
             if index and index.is_in_main_chain:
                 return index.height, block_hash
         return 0, self._height_to_hash.get(0, bytes(32))
+
+    # =================================================================
+    # 헤더 전용 API (헤더 우선 동기화용)
+    # =================================================================
+
+    def add_header(self, header: BlockHeader) -> Tuple[bool, str]:
+        """
+        헤더만 저장 (블록 없이)
+
+        Returns:
+            (success, message)
+        """
+        header_hash = header.get_hash()
+
+        # 이미 블록이 있으면 스킵
+        if header_hash in self._blocks:
+            return False, "Block already exists"
+
+        # 이미 헤더가 있으면 스킵
+        if header_hash in self._header_only:
+            return False, "Header already exists"
+
+        # prev_hash 연결 확인
+        prev_hash = header.prev_block_hash
+        if prev_hash != bytes(32):
+            if prev_hash not in self._block_index and prev_hash not in self._header_only:
+                return False, "Previous header/block not found"
+
+        # PoW 검증
+        if not header.verify_pow():
+            return False, "Invalid PoW"
+
+        # 저장
+        self._header_only[header_hash] = header
+
+        # BlockIndex 생성 (아직 메인 체인 소속 아님)
+        prev_work = 0
+        prev_height = -1
+        if prev_hash in self._block_index:
+            prev_idx = self._block_index[prev_hash]
+            prev_work = prev_idx.total_work
+            prev_height = prev_idx.height
+        elif prev_hash in self._header_only:
+            # 이전 헤더의 인덱스에서 가져옴
+            prev_idx = self._block_index.get(prev_hash)
+            if prev_idx:
+                prev_work = prev_idx.total_work
+                prev_height = prev_idx.height
+
+        new_height = prev_height + 1
+        new_work = prev_work + self._calculate_work(header.difficulty_target)
+
+        index = BlockIndex(
+            block_hash=header_hash,
+            prev_hash=prev_hash,
+            height=new_height,
+            timestamp=header.timestamp,
+            difficulty=header.difficulty_target,
+            total_work=new_work,
+            is_valid=True,
+            is_in_main_chain=False  # 블록이 올 때까지 메인 체인 아님
+        )
+        self._block_index[header_hash] = index
+
+        return True, f"Header added at height {new_height}"
+
+    def add_headers(self, headers: List[BlockHeader]) -> Tuple[int, str]:
+        """
+        헤더 일괄 추가
+
+        Returns:
+            (추가된 수, message)
+        """
+        added = 0
+        skipped = 0
+        for header in headers:
+            success, msg = self.add_header(header)
+            if success:
+                added += 1
+            elif "Invalid" in msg:
+                # PoW 실패 등 심각한 오류 → 중단
+                return added, msg
+            elif "not found" in msg:
+                # prev 없음 → 건너뛰기 (reorg 단절 허용)
+                skipped += 1
+            # "already exists"는 무시하고 계속
+
+        return added, f"{added} headers added, {skipped} skipped"
+
+    def get_headers_to_download(self) -> List[bytes]:
+        """
+        헤더는 있지만 블록이 없는 해시 목록 (높이순)
+
+        Returns:
+            블록 다운로드가 필요한 해시 목록
+        """
+        to_download = []
+        for header_hash in self._header_only:
+            idx = self._block_index.get(header_hash)
+            if idx:
+                to_download.append((idx.height, header_hash))
+
+        to_download.sort(key=lambda x: x[0])
+        return [h for _, h in to_download]
+
+    def has_header(self, block_hash: bytes) -> bool:
+        """블록 또는 헤더 존재 여부"""
+        return block_hash in self._blocks or block_hash in self._header_only
